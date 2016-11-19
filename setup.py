@@ -1,24 +1,24 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Created on Fri Nov 11 15:36:37 2016
+Created on Fri Nov 11 17:13:34 2016
 
 @author: Sinead
 """
-# get all the file directories and modules needed
 
-
-import os
 import sys
-import numpy as np
-import nibabel as nib
-import pydicom as dicom
+import os
 import matplotlib.pyplot as pyplot
+import numpy as np
+import vtk
+import plotly
+import enum
+import IPython
+from IPython.display import Image
+import dicom #pydicom is dicom!!!
+import numpy
 
-
-# add sample 1 to path
-sys.path.append('/Volumes/Backup Data/ASDH Samples/Sample1/Pre-operative/R-N11-109/HeadSpi  1.0  J40s  3')
-sys.path.append('/Volumes/Backup Data/ASDH Samples/Sample1/Post-operative/R-N11-109/HeadSpi  1.0  J40s  3')
-
-# add sample 2 to path
-sys.path.append('/Volumes/Backup Data/ASDH Samples/Sample2/Original')
+os.chdir('/Users/Sinead/DC-project')
+from ds_from_series import ds_from_series
+from vtk.util.numpy_support import vtk_to_numpy, numpy_to_vtk
+from functions import vtk_show, vtkImageToNumPy, plotHeatmap
