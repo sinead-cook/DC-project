@@ -1,34 +1,20 @@
+# conda install mayavi
+# conda install plotly
+# pip install git+https://www.github.com/hbldh/b2ac for the ellipse function
+
 import vtk
 from vtk.util.numpy_support import vtk_to_numpy
-import plotly
-from plotly.graph_objs import *
+import plotly as py
+import plotly.graph_objs as go
+py.offline.init_notebook_mode()
 import numpy as np
-import cv2
+# import cv2
 import matplotlib
+from IPython.display import Image
 
-def cv2sift(ArrayDicom, depth):
-    image_array=ArrayDicom[:,:,depth]
-    matplotlib.image.imsave('sift1post.png', image_array)
-    img = cv2.imread('sift1post.png')
-    gray= cv2.cvtColor(img,cv2.COLOR_BGR2GRAY)
-    sift = cv2.xfeatures2d.SIFT_create()
-    kp = sift.detect(gray,None)
-    img=cv2.drawKeypoints(gray,kp,img)
-    cv2.imwrite('sift2post.png',img)
 
-def cv2siftmatch(comparison_slice, array):
-    matplotlib.image.imsave('comparison_slice.png',comparison_slice)
-    img = cv2.imread('comparison_slice.png')
-    gray = cv2.cvtColor(img,cv2.COLOR_BGR2GRAY)
-    sift = cv2.xfeatures2d.SIFT_create()
-    kp = sift.detect(gray,None)
-    img=cv2.drawKeypoints(gray,kp,img)
-    cv2.imwrite('comparison_slice_features.png',img)
-        
-
-def dicom2np(PathDicom):   
-    #PathDicom = '/Volumes/Backup Data/ASDH Samples/Sample1/Pre-operative/R-N11-109/HeadSpi  1.0  J40s  3'
-    
+def dicom2np():   
+    from __main__ import PathDicom
     reader = vtk.vtkDICOMImageReader()
     reader.SetDirectoryName(PathDicom)
     reader.Update()
@@ -55,8 +41,9 @@ def dicom2np(PathDicom):
     ArrayDicom = ArrayDicom.reshape(ConstPixelDims, order='F')
     return(ArrayDicom)
     
-def vtk2np(input, PathDicom):
-    pointData = input.GetPointData()
+def vtk2np(input_):
+    from __main__ import PathDicom
+    pointData = input_.GetPointData()
     # Ensure that only one array exists within the 'vtkPointData' object
     assert (pointData.GetNumberOfArrays()==1)
     # Get the `vtkArray` (or whatever derived type) which is needed for the `numpy_support.vtk_to_numpy` function
@@ -76,22 +63,27 @@ def vtk2np(input, PathDicom):
     ArrayDicom = vtk_to_numpy(arrayData)
     # Reshape the NumPy array to 3D using 'ConstPixelDims' as a 'shape'
     ArrayDicom = ArrayDicom.reshape(ConstPixelDims, order='F')
-    return(ArrayDicom)
+    return(ArrayDicom, ConstPixelSpacing)
 
-def heatmap(ArrayDicom, depth):
-    # Plot heat map
-    import numpy
-    py.sign_in('sineadey', 'gb269t15xi')
-    rot = numpy.rot90(ArrayDicom[:, :, depth])
-    
-    # using plotly
-    data = [
-        py.graph_objs.Heatmap(
-            z=rot,
-            colorscale='Greys',
-        )
-    ]
-    plotly.offline.iplot(data, filename='name')
+def heatmap(ArrayDicom, depth, x, y):
+
+    heatmap = go.Heatmap(
+            x = x,
+            y = y,
+            z = ArrayDicom[:,:,depth],
+            colorscale = 'Greys'
+            )
+
+    layout = go.Layout(
+        width = 600,
+        height= 600,
+        title='Slice number %i' % depth
+    )
+    data = [heatmap]
+    fig = go.Figure(data=data, layout=layout)
+    py.offline.iplot(fig)
+
+
     
 def pyheatmap(ArrayDicom, slice_, axis):
     if axis==1:
@@ -111,11 +103,9 @@ def pyheatmap(ArrayDicom, slice_, axis):
     #axis('equal')
     show()
     
-def threshim(low, high, PathDicom):
+def threshim(low, high):
     # http://www.programcreek.com/python/example/65395/vtk.vtkThreshold
-    
-    #PathDicom = '/Volumes/Backup Data/ASDH Samples/Sample1/Pre-operative/R-N11-109/HeadSpi  1.0  J40s  3'
-
+    from __main__ import PathDicom
     #threshold data with bone
     import vtk
     reader = vtk.vtkDICOMImageReader()
@@ -125,43 +115,67 @@ def threshim(low, high, PathDicom):
     threshold.SetInputConnection(reader.GetOutputPort())
     threshold.ThresholdByLower(low)  # remove all soft tissue
     threshold.ReplaceInOn()
-    threshold.SetInValue(0)  # set all values below 400 to 0
-    threshold.ReplaceOutOn()
-    threshold.SetOutValue(1)  # set all values above 400 to 1
+    threshold.SetInValue(0)  # set all values below low to 0
+    #threshold.ReplaceOutOn()
+    #threshold.SetOutValue(1)  # set all values above 400 to 1
     threshold.Update()
-    
+
     if high != 'none':
-        threshold.ThresholdByLower(high)  # remove all soft tissue
-        threshold.ReplaceOutOn()
-        threshold.SetOutValue(0)  # set all values above high to 0
-        threshold.Update()
-    return threshold.GetOutput()
-    
-def visualise_array(array,depth):
-    import PIL
-    import numpy as np
-    from PIL import Image
-    im = Image.fromarray(array[:, :, depth])
-    im1 = im.convert('L')
-    return im1
-    
-def thresh_and_visualise(low, high, PathDicom, depth):
-    thresholded=threshim(low,high,PathDicom)
-    array=vtk2np(thresholded,PathDicom)
-    im=visualise_array(array,depth)
-    return im
+        threshold2 = vtk.vtkImageThreshold ()
+        threshold2.SetInputConnection(threshold.GetOutputPort())
+        threshold2.ThresholdByUpper(high)  # remove all soft tissue
+        threshold2.Update()
+        threshold2.ReplaceInOn()
+        threshold2.SetInValue(0)  # set all values above high to 0
+        threshold2.Update()
+        thresholded = threshold2.GetOutput()
+    else:
+        thresholded = threshold.GetOutput()
+    return thresholded
 
-#PathDicom = '/Volumes/Backup Data/ASDH Samples/Sample1/Pre-operative/R-N11-109/HeadSpi  1.0  J40s  3'
-#
-#imageData = threshim(400, 'none', PathDicom)
-#pointData = imageData.GetPointData()
-#assert (pointData.GetNumberOfArrays()==1)
-#arrayData = pointData.GetArray(0)
-#_extent = reader.GetDataExtent()
-#ConstPixelDims = [_extent[1]-_extent[0]+1, _extent[3]-_extent[2]+1, _extent[5]-_extent[4]+1]
-#ConstPixelSpacing = reader.GetPixelSpacing()
-#
-#ArrayDicom = vtk_to_numpy(arrayData)
-#ArrayDicom = ArrayDicom.reshape(ConstPixelDims, order='F')
+def orientation(numpy_array): #numpy_array needs to be binary/thresholded
+    import b2ac.preprocess
+    import b2ac.fit
+    import b2ac.conversion
+    indices = np.nonzero(numpy_array) #will return the indices of any nonzero values
+    x = indices[1]
+    y = indices[0]
+    points = np.zeros((len(indices[1]),2))
+    for i in range(len(indices[1])):
+        points[i, 0] = x[i]
+        points[i, 1] = y[i]
 
-# plot again using preferred method
+    # Fit using NumPy methods in double precision.
+    conic_numpy = b2ac.fit.fit_improved_B2AC_numpy(points)
+
+    # Convert from conic coefficient form to general ellipse form.
+    general_form_numpy = b2ac.conversion.conic_to_general_1(conic_numpy)
+
+    return general_form_numpy # [x, y], [x_axis, y_axis], angle
+    
+def hist_control(data): # optimise number of bins to get the lowest threshold fraction. A thresholdfraction of 0.1 means that the bin with the 2nd highest frequency will have 0.1xthe frequency of the first highest bin.
+    # (1) get rid of frequencies outside a standard deviation of 1. 
+    """ 
+    @ return: Return array. 1st number is the number of bins, 2nd number is the fraction achieved (where fraction is the 2nd highest frequency divided by the highest frequency, 3rd number is the midbin value of the bin corresponding to the highest frequency. 
+    """
+    from scipy.stats import norm
+    hist, bins= np.histogram(data, bins=20)
+    mu,sd = norm.fit(data)
+    for i in range(len(hist)):
+        if bins[i] < (mu-sd) or bins[i] > (mu+sd):
+            hist[i] = 0
+    # (2) optimise number of bins to get largest differences between 1st and second highest frequences
+    fractions = np.zeros((50,3))
+    for num_bins in range(10,60):
+        hist, bins = np.histogram(data, bins=num_bins)
+        midbins=[(bins[i]+bins[i+1])/2 for i in range(len(bins)-1)]
+        data = np.transpose(np.array([hist,midbins]))
+        sorted_ = data[data[:,0].argsort()]
+        fractions[num_bins-10][0]=num_bins # number of bins 
+        fractions[num_bins-10][1]=sorted_[-2][0]/sorted_[-1][0] # fraction 
+        fractions[num_bins-10][2]=sorted_[-1][1] # midbin value
+    ind = np.where(fractions[1]==min(fractions[1]))[0][0]
+    return fractions[ind]
+
+    
+    
