@@ -3,7 +3,7 @@
 # pip install git+https://www.github.com/hbldh/b2ac for the ellipse function
 
 import vtk
-from vtk.util.numpy_support import vtk_to_numpy
+from vtk.util.numpy_support import vtk_to_numpy, numpy_to_vtk
 import plotly as py
 import plotly.graph_objs as go
 py.offline.init_notebook_mode()
@@ -48,45 +48,7 @@ def nii2np():
     from __main__ import PathDicom
     img = nib.load(PathDicom)
     img_data = img.get_data()
-    img_data_shape = img_data.shape
-    header = img.header
-
-    spacing = header['pixdim'][1:4]
-
-    dataImporter = vtk.vtkImageImport()
-    dataImporter.SetDataScalarTypeToShort()
-    data_string = img_data.tostring()
-    dataImporter.SetNumberOfScalarComponents(1)
-    dataImporter.CopyImportVoidPointer(data_string, len(data_string))
-    dataImporter.SetDataExtent(0, img_data_shape[0] - 1, 0, img_data_shape[1] - 1, 0, img_data_shape[2] - 1)
-    dataImporter.SetWholeExtent(0, img_data_shape[0] - 1, 0, img_data_shape[1] - 1, 0, img_data_shape[2] - 1)
-    dataImporter.SetDataSpacing(spacing[0], spacing[1], spacing[2])
-    dataImporter.Update()
-    temp_data = dataImporter.GetOutput()
-    imageData = vtk.vtkImageData()
-    imageData.DeepCopy(temp_data)
-  
-    # Get the 'vtkImageData' object from the reader
-    # imageData = reader.GetOutput()
-    # Get the 'vtkPointData' object from the 'vtkImageData' object
-    pointData = imageData.GetPointData()
-    # Ensure that only one array exists within the 'vtkPointData' object
-    assert (pointData.GetNumberOfArrays()==1)
-    # Get the `vtkArray` (or whatever derived type) which is needed for the `numpy_support.vtk_to_numpy` function
-    arrayData = pointData.GetArray(0)
-    
-    # Load dimensions using `GetDataExtent`
-    _extent = dataImporter.GetDataExtent()
-    ConstPixelDims = [_extent[1]-_extent[0]+1, _extent[3]-_extent[2]+1, _extent[5]-_extent[4]+1]
-    
-    # Load spacing values
-    ConstPixelSpacing = dataImporter.GetDataSpacing()
-    
-    # Convert the `vtkArray` to a NumPy array
-    ArrayDicom = vtk_to_numpy(arrayData)
-    # Reshape the NumPy array to 3D using 'ConstPixelDims' as a 'shape'
-    ArrayDicom = ArrayDicom.reshape(ConstPixelDims, order='F')
-    return(ArrayDicom)
+    return(img_data)
     
 def vtk2np(input_):
     from __main__ import PathDicom
@@ -125,32 +87,12 @@ def vtk2np_nii(input_):
     img = nib.load(PathDicom)
     img_data = img.get_data()
     img_data_shape = img_data.shape
-    
-    header = img.header
-
-    spacing = header['pixdim'][1:4]
-
-    dataImporter = vtk.vtkImageImport()
-    dataImporter.SetDataScalarTypeToShort()
-    data_string = img_data.tostring()
-    dataImporter.SetNumberOfScalarComponents(1)
-    dataImporter.CopyImportVoidPointer(data_string, len(data_string))
-    dataImporter.SetDataExtent(0, img_data_shape[0] - 1, 0, img_data_shape[1] - 1, 0, img_data_shape[2] - 1)
-    dataImporter.SetWholeExtent(0, img_data_shape[0] - 1, 0, img_data_shape[1] - 1, 0, img_data_shape[2] - 1)
-    
-    dataImporter.SetDataSpacing(spacing[0], spacing[1], spacing[2])
-    dataImporter.Update()
-    temp_data = dataImporter.GetOutput()
-    imageData = vtk.vtkImageData()
-    imageData.DeepCopy(temp_data)
-   
-    # Load dimensions using `GetDataExtent`
-    _extent = dataImporter.GetDataExtent()
+    _extent = (0, img_data_shape[0] - 1, 0, img_data_shape[1] - 1, 0, img_data_shape[2] - 1)
     ConstPixelDims = [_extent[1]-_extent[0]+1, _extent[3]-_extent[2]+1, _extent[5]-_extent[4]+1]
-    
+    header = img.header
+    spacing = header['pixdim'][1:4]
     # Load spacing values
-    ConstPixelSpacing = dataImporter.GetDataSpacing()
-    
+    ConstPixelSpacing = spacing[0], spacing[1], spacing[2]
     # Convert the `vtkArray` to a NumPy array
     ArrayDicom = vtk_to_numpy(arrayData)
     # Reshape the NumPy array to 3D using 'ConstPixelDims' as a 'shape'
@@ -238,17 +180,14 @@ def threshim_nii(low, high):
 
     dataImporter = vtk.vtkImageImport()
     dataImporter.SetDataScalarTypeToShort()
-    data_string = img_data.tostring()
+    data_string = img_data.flatten('F').tostring()
     dataImporter.SetNumberOfScalarComponents(1)
     dataImporter.CopyImportVoidPointer(data_string, len(data_string))
     dataImporter.SetDataExtent(0, img_data_shape[0] - 1, 0, img_data_shape[1] - 1, 0, img_data_shape[2] - 1)
     dataImporter.SetWholeExtent(0, img_data_shape[0] - 1, 0, img_data_shape[1] - 1, 0, img_data_shape[2] - 1)
     dataImporter.SetDataSpacing(spacing[0], spacing[1], spacing[2])
     dataImporter.Update()
-    temp_data = dataImporter.GetOutput()
-#    imageData = vtk.vtkImageData()
-#    imageData.DeepCopy(temp_data)
-    
+        
     threshold = vtk.vtkImageThreshold ()
     threshold.SetInputConnection(dataImporter.GetOutputPort())
     threshold.ThresholdByLower(low)  # remove all soft tissue

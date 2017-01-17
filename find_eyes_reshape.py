@@ -82,7 +82,7 @@ def indexed_data(circles_data, circles_per_slice):
     return hist_data
 
 def reshape(hist_data0, hist_data1, hist_data2):
-           # if axis_no is 0: 1st column is z, 2nd column is y, 3rd column is x. 
+        # if axis_no is 0: 1st column is z, 2nd column is y, 3rd column is x. 
         # if axis_no is 1: 1st column is z, 2nd column is x, 3rd column is y.
         # if axis_no is 2: 1st column is y, 2nd column is x, 3rd column is z.
     x0 = hist_data0[:,:,2].ravel()
@@ -107,6 +107,22 @@ def reshape(hist_data0, hist_data1, hist_data2):
 
     hist_data = np.array([x,y,z,r]).T
     return hist_data
+
+def circles_data(thresholded_np, num_circles):
+    """ Fixes hist_data dimensions """
+    circles_data0 = all_slices(0, thresholded_np, 1)
+    hist_data0 = indexed_data(circles_data0, num_circles)
+
+    circles_data1 = all_slices(1, thresholded_np, 1)
+    hist_data1 = indexed_data(circles_data1, num_circles)
+
+    circles_data2 = all_slices(2, thresholded_np, 1)
+    hist_data2 = indexed_data(circles_data2, num_circles)
+    
+    hist_data = reshape(hist_data0,hist_data1,hist_data2)
+    
+    return hist_data
+
 
 def hist3d(hist_data):
     H, edges = np.histogramdd(hist_data[:, 0:3]) 
