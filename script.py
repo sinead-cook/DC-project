@@ -13,9 +13,28 @@ import matplotlib
 from IPython.display import Image
 import nibabel as nib
 
+def reject_outliers(data, m=3):
+    dx = np.abs(data[0] - np.median(data[0]))
+    dy = np.abs(data[1] - np.median(data[1]))
+    dz = np.abs(data[2] - np.median(data[2]))
+    mdevx = np.median(dx)
+    mdevy = np.median(dy)
+    mdevz = np.median(dz)
+    # if else is preventing from dividing by 0. if the median is 0, all
+    # the differences have to be 0 becaues dx, dy, dz don't contain
+    # negative numbers
+    sx = dx/mdevx if mdevx else 0. 
+    sy = dy/mdevy if mdevy else 0.
+    sz = dz/mdevz if mdevz else 0.
+    logicalx = sx<m
+    logicaly = sy<m
+    logicalz = sz<m
+    e = data*logicalx*logicaly*logicalz
+    data_return = np.array(e[:,e[1]!=0])
+    return data_return
+
+
 def dicom2np():
-    
-    
     from __main__ import PathDicom
     reader = vtk.vtkDICOMImageReader()
     reader.SetDirectoryName(PathDicom)
@@ -214,10 +233,8 @@ def orientation(numpy_array): #numpy_array needs to be binary/thresholded
     import b2ac.preprocess
     import b2ac.fit
     import b2ac.conversion
-    for i in range(numpy_array.shape[0]):
-        for j in range(numpy_array.shape[1]):
-            if abs(numpy_array[i,j])<0.01:
-                numpy_array[i,j] = 0
+    numpy_array[abs(numpy_array)<0.01] = 0
+    numpy_array[~np.isfinite(numpy_array)] = 0
     indices = np.nonzero(numpy_array) # will return the indices of any nonzero values
     x = indices[1]
     y = indices[0]
@@ -228,9 +245,7 @@ def orientation(numpy_array): #numpy_array needs to be binary/thresholded
     try:
         points, x_mean, y_mean = b2ac.preprocess.remove_mean_values(points)
         # Fit using NumPy methods in double precision.
-
         conic_double = b2ac.fit.fit_improved_B2AC_double(points)
-
         # Convert from conic coefficient form to general ellipse form.
         general_form_double = b2ac.conversion.conic_to_general_1(conic_double)
         general_form_double[0][0] += x_mean
@@ -289,3 +304,178 @@ def reshape(array, ConstPixelSpacing, a, c, width, depth):
             reshaped_array3[i,j,:] = np.interp(x, xp, reshaped_array2[i,j,:])
 
     return reshaped_array3
+
+def ellipses(rotated2):
+    angles=np.zeros(rotated2.shape[2])
+    xcentroids=np.zeros(rotated2.shape[2])
+    ycentroids=np.zeros(rotated2.shape[2])
+    xmajor_axis_points=np.zeros(rotated2.shape[2])
+    ymajor_axis_points=np.zeros(rotated2.shape[2])
+    for i in range(rotated2.shape[2]):
+        try:
+            array_i=rotated2[:,:,i] # array to pass to 'orientation' must be thresholded already
+            orientation_i=orientation(array_i)
+            angles[i]=orientation_i[2] # pick out the angle
+            xcentroids[i]=orientation_i[0][0]
+            ycentroids[i]=orientation_i[0][1]
+            xmajor_axis_points[i] = xcentroids[i]+orientation_i[1][1]*np.cos(angles[i])
+            ymajor_axis_points[i] = ycentroids[i]+orientation_i[1][1]*np.sin(angles[i])
+        except:
+            pass
+    return angles, xcentroids, ycentroids, xmajor_axis_points, ymajor_axis_points
+
+def select_ellipses_range(angles):
+    # make all angles positive
+    angles[angles < 0] += np.pi
+    import scipy.signal as signal
+    # First, design the Butterworth filter
+    N  = 1   # Filter order - the higher the order, the sharper the dropoff
+    pd = float(20)  # Cutoff period - the inverse is the cutoff frequency
+    fs = 1 # Sample rate frequency
+    nyq = 0.5*fs
+    low = 1/pd
+    wn = low/nyq # Cutoff frequency as a fraction
+    b, a = signal.butter(N, wn, output='ba')
+    filt_angles = signal.filtfilt(b,a, angles)
+    angles_diff = filt_angles-angles
+    indices = [] # indices holds the slice range of interest
+    for i in range(len(angles)):
+        if abs(angles_diff[i]) < 0.05:
+            indices.append(i)
+    from itertools import groupby
+    z = zip(indices, indices[1:])
+    tmp = ([list(j) for i, j in groupby(z, key=lambda x: (x[1] - x[0]) <= 1)])
+    tmp = sorted(tmp, key=len) # longest lists at the end
+    maxtmp = np.array(max(tmp, key=len))
+    slices = list(range(maxtmp[0][0], maxtmp[-1][-1]+1))
+    slice_angles = [angles[i] for i in slices]
+    if not 0<abs(np.mean(slice_angles))<20/360*2*np.pi or not np.pi/2-20/360*2*np.pi<abs(np.mean(slice_angles))<20/360*2*np.pi+np.pi/2:
+        slice_angles = ['use eyes']
+        slices = ['use eyes']
+    return slices, slice_angles
+
+def find_plane_from_ellipses(rotated2, slices, head_x, head_y, head_angles):
+    rotated2[abs(rotated2)<0.01] = 0
+    rotated2[~np.isfinite(rotated2)]=0
+    x=[]
+    y=[]
+    remaining_z = range(rotated2.shape[2]-1, slices[-1],-1)
+    for i in remaining_z:
+        x.append(np.mean(np.nonzero(rotated2[:,:,i])[1]))
+        y.append(np.mean(np.nonzero(rotated2[:,:,i])[0]))
+    centroids_array = np.concatenate((np.array([head_x,head_y,slices]).T, np.array([x,y,remaining_z]).T),axis=0).T
+    centroids_array[~np.isfinite(centroids_array)]=0
+    centroids_array[abs(centroids_array)<0.01] = 0
+    centroids_array = reject_outliers(centroids_array)
+    from scipy.optimize import curve_fit
+    def f(x,A,B):
+        return A*x + B
+    A_x1,B_x1 = curve_fit(f, centroids_array[2], centroids_array[0])[0] # your data x, y to fit
+    A_y1,B_y1 = curve_fit(f, centroids_array[2], centroids_array[1])[0] # your data x, y to fit
+
+    z = np.median(slices)
+    x = A_x1*z + B_x1
+    y = A_y1*z + B_y1
+    # point that the plane goes through, p
+    p = np.array([x, y, z]) # coordinates when z = mean(indices)
+    print p
+    # one vector of plane, v1
+    v1 = np.array([A_x1, A_y1, 1])
+    # second vector of plane, v2
+    mean_angle = np.mean(head_angles)
+    v2 = np.array([np.cos(mean_angle+np.pi/2), np.sin(mean_angle+np.pi/2), 0])
+    normal = np.cross(v1,v2)
+    # a plane is ax+by+cz = d - find d
+    print normal
+    d = np.dot(p,normal)
+    # superpose plane onto slices
+    a = normal[0]
+    b = normal[1]
+    c = normal[2]
+    # plane equation is ax+by+cz = d
+    # for each slice substitute slice number into z to get equation
+    return a,b,c,d
+
+def visualise_single(rotated2, a,b,c,d, slice_no):
+    slice_ = rotated2[:,:,slice_no]
+    heatmap = go.Heatmap(
+            z = slice_,
+            colorscale=[[0.0, 'rgb(160,160,160)'], 
+                        [0.1111111111111111, 'rgb(20,20,20)'], 
+                        [0.2222222222222222, 'rgb(40,40,40)'], 
+                        [0.3333333333333333, 'rgb(100,100,100)'], 
+                        [0.4444444444444444, 'rgb(120,120,120)'], 
+                        [0.5555555555555556, 'rgb(140,140,140)'], 
+                        [0.6666666666666666, 'rgb(160,160,160)'], 
+                        [0.7777777777777778, 'rgb(170,170,170)'], 
+                        [0.8888888888888888, 'rgb(250,250,250)'], 
+                        [1.0, 'rgb(250,250,250)']]
+            )
+    x = np.linspace(0,slice_.shape[0], 2)
+    y = (d-c*slice_no-a*x)/b
+    midline = go.Scatter(
+        x = x,
+        y = y,
+        mode = 'lines'
+    )
+    layout = go.Layout(
+        width = 600,
+        height= 500,
+    #     title='Fig. 10. Slice number %i' % slice_no,
+        title='Fig. 10. Slice of the midplane found', # title for report
+        showlegend = False,
+            margin= go.Margin(
+            l=50,
+            r=50,
+            b=100,
+            t=50,
+            pad=4
+            ),
+#        yaxis=dict(
+#            range=[50, 220]
+#        ),
+#        xaxis=dict(
+#            range=[0, 220]
+#        )
+    )
+
+    data = [heatmap, midline]
+    fig = go.Figure(data=data, layout=layout)
+    py.offline.iplot(fig)
+    return None
+
+def save_midplane(rotated2, a,b,c,d, samp):
+    for slice_no in range(0,rotated2.shape[2],5):
+        slice_ = rotated2[:,:,slice_no]
+        heatmap = go.Heatmap(
+                z = slice_,
+                colorscale=[[0.0, 'rgb(160,160,160)'], 
+                        [0.1111111111111111, 'rgb(20,20,20)'], 
+                        [0.2222222222222222, 'rgb(40,40,40)'], 
+                        [0.3333333333333333, 'rgb(100,100,100)'], 
+                        [0.4444444444444444, 'rgb(120,120,120)'], 
+                        [0.5555555555555556, 'rgb(140,140,140)'], 
+                        [0.6666666666666666, 'rgb(160,160,160)'], 
+                        [0.7777777777777778, 'rgb(170,170,170)'], 
+                        [0.8888888888888888, 'rgb(250,250,250)'], 
+                        [1.0, 'rgb(250,250,250)']]
+                )
+
+        x = np.linspace(0,slice_.shape[0], 2)
+        y = (d-c*slice_no-a*x)/b
+
+        midline = go.Scatter(
+            x = x,
+            y = y,
+            mode = 'lines'
+        )
+
+        layout = go.Layout(
+            width = 600,
+            height= 600,
+            title='Slice number %i' % slice_no
+        )
+        data = [heatmap, midline]
+        fig = go.Figure(data=data, layout=layout)
+        py.plotly.image.save_as(fig, filename='{}_slice_{}.png'.format(samp, slice_no))
+    return None
