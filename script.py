@@ -13,7 +13,7 @@ import matplotlib
 from IPython.display import Image
 import nibabel as nib
 
-def reject_outliers(data, m=3):
+def reject_outliers(data, m=2):
     dx = np.abs(data[0] - np.median(data[0]))
     dy = np.abs(data[1] - np.median(data[1]))
     dz = np.abs(data[2] - np.median(data[2]))
@@ -32,7 +32,6 @@ def reject_outliers(data, m=3):
     e = data*logicalx*logicaly*logicalz
     data_return = np.array(e[:,e[1]!=0])
     return data_return
-
 
 def dicom2np():
     from __main__ import PathDicom
@@ -235,23 +234,29 @@ def orientation(numpy_array): #numpy_array needs to be binary/thresholded
     import b2ac.conversion
     numpy_array[abs(numpy_array)<0.01] = 0
     numpy_array[~np.isfinite(numpy_array)] = 0
-    indices = np.nonzero(numpy_array) # will return the indices of any nonzero values
+    indices = np.nonzero(numpy_array)
     x = indices[1]
     y = indices[0]
+    z = indices[0] - indices[0]
+    xyz = reject_outliers(np.array([x,y,z]))
+    x = xyz[0, :]
+    y = xyz[1, :]
     points = np.zeros((len(indices[1]),2))
-    for i in range(len(indices[1])):
+    for i in range(x.shape[0]):
         points[i, 0] = x[i]
         points[i, 1] = y[i]
-    try:
-        points, x_mean, y_mean = b2ac.preprocess.remove_mean_values(points)
-        # Fit using NumPy methods in double precision.
-        conic_double = b2ac.fit.fit_improved_B2AC_double(points)
-        # Convert from conic coefficient form to general ellipse form.
-        general_form_double = b2ac.conversion.conic_to_general_1(conic_double)
-        general_form_double[0][0] += x_mean
-        general_form_double[0][1] += y_mean
-    except:
-        general_form_double = 0
+    if points.shape[0] > 1:
+        try:
+            points, x_mean, y_mean = b2ac.preprocess.remove_mean_values(points)
+            # Fit using NumPy methods in double precision.
+            conic_double = b2ac.fit.fit_improved_B2AC_double(points)
+            # Convert from conic coefficient form to general ellipse form.
+            general_form_double = b2ac.conversion.conic_to_general_1(conic_double)
+            general_form_double[0][0] += x_mean
+            general_form_double[0][1] += y_mean
+        except:
+            general_form_double = 0
+    else: general_form_double = 0
     return general_form_double # [x, y], [x_axis, y_axis], angle
     
 def hist_control(data): # optimise number of bins to get the lowest threshold fraction. A thresholdfraction of 0.1 means that the bin with the 2nd highest frequency will have 0.1xthe frequency of the first highest bin.
@@ -311,17 +316,19 @@ def ellipses(rotated2):
     ycentroids=np.zeros(rotated2.shape[2])
     xmajor_axis_points=np.zeros(rotated2.shape[2])
     ymajor_axis_points=np.zeros(rotated2.shape[2])
+    print "Starting ellipse fitting"
     for i in range(rotated2.shape[2]):
-        try:
-            array_i=rotated2[:,:,i] # array to pass to 'orientation' must be thresholded already
-            orientation_i=orientation(array_i)
+    #    print 'Slice number {}'.format(i)
+        array_i=rotated2[:,:,i] # array to pass to 'orientation' must be thresholded already
+        orientation_i=orientation(array_i)
+        if orientation_i != 0: 
             angles[i]=orientation_i[2] # pick out the angle
             xcentroids[i]=orientation_i[0][0]
             ycentroids[i]=orientation_i[0][1]
             xmajor_axis_points[i] = xcentroids[i]+orientation_i[1][1]*np.cos(angles[i])
             ymajor_axis_points[i] = ycentroids[i]+orientation_i[1][1]*np.sin(angles[i])
-        except:
-            pass
+        else: pass
+    #    else: print 'Slice {} contains 0'.format(i)
     return angles, xcentroids, ycentroids, xmajor_axis_points, ymajor_axis_points
 
 def select_ellipses_range(angles):
@@ -340,60 +347,80 @@ def select_ellipses_range(angles):
     angles_diff = filt_angles-angles
     indices = [] # indices holds the slice range of interest
     for i in range(len(angles)):
-        if abs(angles_diff[i]) < 0.05:
+        if abs(angles_diff[i]) < 0.05 and 1.45<angles[i]<1.75:
             indices.append(i)
     from itertools import groupby
     z = zip(indices, indices[1:])
     tmp = ([list(j) for i, j in groupby(z, key=lambda x: (x[1] - x[0]) <= 1)])
     tmp = sorted(tmp, key=len) # longest lists at the end
-    maxtmp = np.array(max(tmp, key=len))
-    slices = list(range(maxtmp[0][0], maxtmp[-1][-1]+1))
-    slice_angles = [angles[i] for i in slices]
-    if not 0<abs(np.mean(slice_angles))<20/360*2*np.pi or not np.pi/2-20/360*2*np.pi<abs(np.mean(slice_angles))<20/360*2*np.pi+np.pi/2:
-        slice_angles = ['use eyes']
-        slices = ['use eyes']
+    if len(tmp)>1:
+        maxtmp = np.array(max(tmp, key=len))
+        slices = list(range(maxtmp[0][0], maxtmp[-1][-1]+1))
+        slice_angles = [angles[i] for i in slices]
+    else:
+        slices = []
+        slice_angles = [np.pi/2]
+#    if not 0<abs(np.mean(slice_angles))<20/360*2*np.pi or not np.pi/2-20/360*2*np.pi<abs(np.mean(slice_angles))<20/360*2*np.pi+np.pi/2:
+#        slice_angles = ['use eyes']
+#        slices = ['use eyes']
     return slices, slice_angles
 
-def find_plane_from_ellipses(rotated2, slices, head_x, head_y, head_angles):
+def find_plane_from_ellipses(rotated2, array_eyes2, slices, head_x, head_y, head_angles):
+    import find_eyes_reshape as fer
     rotated2[abs(rotated2)<0.01] = 0
     rotated2[~np.isfinite(rotated2)]=0
-    x=[]
-    y=[]
-    remaining_z = range(rotated2.shape[2]-1, slices[-1],-1)
-    for i in remaining_z:
-        x.append(np.mean(np.nonzero(rotated2[:,:,i])[1]))
-        y.append(np.mean(np.nonzero(rotated2[:,:,i])[0]))
-    centroids_array = np.concatenate((np.array([head_x,head_y,slices]).T, np.array([x,y,remaining_z]).T),axis=0).T
-    centroids_array[~np.isfinite(centroids_array)]=0
-    centroids_array[abs(centroids_array)<0.01] = 0
-    centroids_array = reject_outliers(centroids_array)
-    from scipy.optimize import curve_fit
-    def f(x,A,B):
-        return A*x + B
-    A_x1,B_x1 = curve_fit(f, centroids_array[2], centroids_array[0])[0] # your data x, y to fit
-    A_y1,B_y1 = curve_fit(f, centroids_array[2], centroids_array[1])[0] # your data x, y to fit
+    H, edges, data, hist_data_2c = fer.hist3d_all(array_eyes2)
+    ranges_1, ranges_2, certainty = fer.ranges(H,edges)
+    c1,c2 = fer.coords(hist_data_2c, ranges_1, ranges_2)
+    c = (c1+c2)/2.0
+    c = np.roll(c,1)
+    if slices != []:
+        x=[]
+        y=[]
+        remaining_z = range(rotated2.shape[2]-1, slices[-1],-1)
+        for i in remaining_z:
+            x.append(np.mean(np.nonzero(rotated2[:,:,i])[1]))
+            y.append(np.mean(np.nonzero(rotated2[:,:,i])[0]))
+        centroids_array = np.concatenate((np.array([head_x,head_y,slices]).T, np.array([x,y,remaining_z]).T),axis=0).T
+        centroids_array[~np.isfinite(centroids_array)]=0
+        centroids_array[abs(centroids_array)<0.01] = 0
+        centroids_array = reject_outliers(centroids_array)
+        from scipy.optimize import curve_fit
+        def f(x,A,B):
+            return A*x + B
+        A_x1,B_x1 = curve_fit(f, centroids_array[2], centroids_array[0])[0] # your data x, y to fit
+        A_y1,B_y1 = curve_fit(f, centroids_array[2], centroids_array[1])[0] # your data x, y to fit
 
-    z = np.median(slices)
-    x = A_x1*z + B_x1
-    y = A_y1*z + B_y1
-    # point that the plane goes through, p
-    p = np.array([x, y, z]) # coordinates when z = mean(indices)
-    print p
-    # one vector of plane, v1
-    v1 = np.array([A_x1, A_y1, 1])
-    # second vector of plane, v2
-    mean_angle = np.mean(head_angles)
-    v2 = np.array([np.cos(mean_angle+np.pi/2), np.sin(mean_angle+np.pi/2), 0])
-    normal = np.cross(v1,v2)
-    # a plane is ax+by+cz = d - find d
-    print normal
-    d = np.dot(p,normal)
-    # superpose plane onto slices
-    a = normal[0]
-    b = normal[1]
-    c = normal[2]
-    # plane equation is ax+by+cz = d
-    # for each slice substitute slice number into z to get equation
+        z = np.median(slices)
+        x = A_x1*z + B_x1
+        y = A_y1*z + B_y1
+        # point that the plane goes through, p
+        p = np.array([x, y, z]) # coordinates when z = mean(indices)
+        print p
+        v1 = np.array([A_x1/2, A_y1/2, 1])
+        mean_angle = np.mean(head_angles)
+        #mean_angle = hist_control(head_angles)[2]
+        v2a = np.array([np.cos(mean_angle+np.pi/2), np.sin(mean_angle+np.pi/2), 0])
+        v2b = (p - c)
+        v2b = v2b/(np.sum(np.power(v2b,2)))
+        v2 = (v2a+v2b)/2.0
+        normal = np.cross(v1,v2)
+        # a plane is ax+by+cz = d - find d
+        d = np.dot(p,normal)
+        # superpose plane onto slices
+        a = normal[0]
+        b = normal[1]
+        c = normal[2]
+        # plane equation is ax+by+cz = d
+        # for each slice substitute slice number into z to get equation
+    else:
+        v1 = np.array([0,0,1])
+        v2 = np.array([1,0,0])
+        normal = np.cross(v1,v2)
+        d = np.dot(c,normal)
+        a = normal[0]
+        b = normal[1]
+        c = normal[2]
     return a,b,c,d
 
 def visualise_single(rotated2, a,b,c,d, slice_no):

@@ -249,7 +249,8 @@ def coords(hist_data_2c, ranges_1, ranges_2):
 def check_coords(c1, c2, array_eyes):
     
     """Plots figures checking that the coordinates were correctly chosen for the 2 eye sockets"""
-    
+    c1 = c1.astype(int)
+    c2 = c2.astype(int)
     plt.clf()
     fig = plt.figure()
     plt.imshow(array_eyes[:,:,c1[2]])
