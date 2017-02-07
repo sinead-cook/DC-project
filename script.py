@@ -59,14 +59,23 @@ def dicom2np():
     ArrayDicom = vtk_to_numpy(arrayData)
     # Reshape the NumPy array to 3D using 'ConstPixelDims' as a 'shape'
     ArrayDicom = ArrayDicom.reshape(ConstPixelDims, order='F')
-    return(ArrayDicom)
+    return(ArrayDicom, ConstPixelSpacing)
 
 def nii2np():
     # http://localhost:8888/edit/DC-project/script.py for nii
     from __main__ import PathDicom
     img = nib.load(PathDicom)
     img_data = img.get_data()
-    return(img_data)
+    
+    img_data_shape = img_data.shape
+    _extent = (0, img_data_shape[0] - 1, 0, img_data_shape[1] - 1, 0, img_data_shape[2] - 1)
+    ConstPixelDims = [_extent[1]-_extent[0]+1, _extent[3]-_extent[2]+1, _extent[5]-_extent[4]+1]
+    header = img.header
+    spacing = header['pixdim'][1:4]
+    # Load spacing values
+    ConstPixelSpacing = spacing[0], spacing[1], spacing[2]
+    
+    return(img_data, ConstPixelSpacing)
     
 def vtk2np(input_):
     from __main__ import PathDicom
