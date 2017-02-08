@@ -341,9 +341,9 @@ def correct_skews(angle1, angle2, array):
     if abs(angle1) < 45:
         rotated1 = rotate(array, angle1, mode='nearest', axes=(2,0))
         angle1rad = angle1/360*2*np.pi
-        rotated2 = rotate(rotated1, angle2*(1-np.sin(angle1rad)), mode='nearest', axes=(0,1))
+        rotated2 = rotate(rotated1, angle2*(1-np.sin(angle1rad)),mode='nearest', axes=(0,1)) #  can add back in
     elif abs(angle1) > 45:
         rotated1 = rotate(array, 90-angle1, mode='nearest', axes=(2,0))
         angle1rad = angle1/360*2*np.pi
-        rotated2 = rotate(rotated1, angle2*(np.sin(angle1rad)), mode='nearest', axes=(0,1))
+        rotated2 = rotate(rotated1, angle2*(np.sin(angle1rad)),mode='nearest', axes=(0,1)) # mode='nearest', can add back in
     return rotated1, rotated2
