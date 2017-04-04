@@ -8,7 +8,6 @@ import plotly as py
 import plotly.graph_objs as go
 py.offline.init_notebook_mode()
 import numpy as np
-# import cv2
 import matplotlib
 from IPython.display import Image
 import nibabel as nib
@@ -456,7 +455,7 @@ def visualise_single(rotated2, a,b,c,d, slice_no):
     )
     layout = go.Layout(
         width = 600,
-        height= 500,
+        height= 600,
     #     title='Fig. 10. Slice number %i' % slice_no,
         title='Fig. 10. Slice of the midplane found', # title for report
         showlegend = False,
@@ -467,12 +466,7 @@ def visualise_single(rotated2, a,b,c,d, slice_no):
             t=50,
             pad=4
             ),
-#        yaxis=dict(
-#            range=[50, 220]
-#        ),
-#        xaxis=dict(
-#            range=[0, 220]
-#        )
+        
     )
 
     data = [heatmap, midline]
