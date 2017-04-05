@@ -1,8 +1,8 @@
 import numpy as np
 import script
 import matplotlib.pyplot as plt
-# import cv2
-# import cv2.cv as cv
+import cv2
+import cv2.cv as cv
 import matplotlib.image
 
 def single_slice(axis_no, thresholded_np, slice_no):
