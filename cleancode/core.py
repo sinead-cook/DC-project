@@ -60,6 +60,8 @@ def dicom2np(path):
         # store the raw image data
         array[:, :, lstFilesDCM.index(filenameDCM)] = ds.pixel_array  
         
+    array = array*RefDsFirst.RescaleSlope + RefDsFirst.RescaleIntercept
+        
     T1 = np.array(ImagePositionPatientFirst).astype(float)
     TN = np.array(ImagePositionPatientLast).astype(float)
     thirdCol = np.divide(T1-TN,1.-float(array.shape[2]))
@@ -73,7 +75,7 @@ def dicom2np(path):
     affine[:,3][:3] = [-T1[0], -T1[1], T1[2]]
     affine[3,3] = 1.    
     
-    return(array, ConstPixelSpacing, affine)
+    return(array, ConstPixelSpacing, RefDsFirst.ImagePositionPatient)
 
 def nifti2np(pathNifti):
     """ 
@@ -233,7 +235,8 @@ def selectEllipsesRange(angles):
     angles_diff = filt_angles-angles
     indices = [] # indices holds the slice range of interest
     for i in range(len(angles)):
-        if abs(angles_diff[i]) < 0.05 and 1.45<angles[i]<1.75:
+#       if abs(angles_diff[i]) < 0.1 and (1.45<abs(angles[i])<1.75 or 1.45-0.5*np.pi<abs(angles[i])<1.75-0.5*np.pi):
+        if abs(angles_diff[i]) < 0.1 and 1.4<abs(angles[i])<1.8:
             indices.append(i)
     from itertools import groupby
     z = zip(indices, indices[1:])
@@ -251,18 +254,14 @@ def selectEllipsesRange(angles):
 #        slices = ['use eyes']
     return slices, slice_angles
 
-def findPlaneFromEllipses(bone, c1, c2, slices, head_x, head_y, head_angles):
-
+def findPlaneFromEllipses(bone, c1, c2, slices, head_x, head_y, head_angles): 
     import findeyes as fer
     bone[abs(bone)<0.01]    = 0
     bone[~np.isfinite(bone)]= 0
-
-    c = (c1+c2)/2.0
-    c = np.roll(c,1)
+    coord = (c1+c2)/2.0
+    coord = np.roll(coord,1)
     if slices != []:
-
         print '\n','Using ellipses to find midplane','\n'
-
         x=[]
         y=[]
         remaining_z = range(bone.shape[2]-1, slices[-1],-1)
@@ -272,7 +271,7 @@ def findPlaneFromEllipses(bone, c1, c2, slices, head_x, head_y, head_angles):
         centroids_array = np.concatenate((np.array([head_x,head_y,slices]).T, np.array([x,y,remaining_z]).T),axis=0).T
         centroids_array[~np.isfinite(centroids_array)]=0
         centroids_array[abs(centroids_array)<0.01] = 0
-        centroids_array = rejectOutliers(centroids_array)
+        centroids_array = core.rejectOutliers(centroids_array)
         from scipy.optimize import curve_fit
         def f(x,A,B):
             return A*x + B
@@ -282,19 +281,26 @@ def findPlaneFromEllipses(bone, c1, c2, slices, head_x, head_y, head_angles):
         z = np.median(slices)
         x = A_x1*z + B_x1
         y = A_y1*z + B_y1
-        # point that the plane goes through, p
-        p = np.array([x, y, z]) # coordinates when z = mean(indices)
-        print p
+#        # point that the plane goes through, p
+#        p = np.array([x, y, z]) # coordinates when z = mean(indices)
+#        print 'p = ', p
         v1 = np.array([A_x1/2, A_y1/2, 1])
+        v1 = v1/np.sqrt((np.sum(np.power(v1,2))))
+#        print 'v1 = ', v1
         mean_angle = np.mean(head_angles)
-
-        v2a = np.array([np.cos(mean_angle+np.pi/2), np.sin(mean_angle+np.pi/2), 0])
-        v2b = (p - c)
-        v2b = v2b/(np.sum(np.power(v2b,2)))
-        v2 = (v2a+v2b)/2.0
+        v2 = np.array([np.cos(mean_angle+np.pi/2), np.sin(mean_angle+np.pi/2), 0])
+#         v2b = (p - coord)
+#         v2b = v2b/(np.sqrt(np.sum(np.power(v2b,2))))
+#         v2b = np.nan_to_num(v2b)
+#         print v2a, v2b
+#         v2 = (v2a+v2b)/2.0
         normal = np.cross(v1,v2)
+        normal = normal/np.sqrt((np.sum(np.power(normal,2))))
+#         print 'normal before invalid = ',normal
+        normal = np.nan_to_num(normal)
         # a plane is ax+by+cz = d - find d
-        d = np.dot(p,normal)
+        print coord, v1, v2
+        d = np.dot(coord,normal)
         # superpose plane onto slices
         a = normal[0]
         b = normal[1]
@@ -308,7 +314,7 @@ def findPlaneFromEllipses(bone, c1, c2, slices, head_x, head_y, head_angles):
         v1 = np.array([0,0,1])
         v2 = np.array([1,0,0])
         normal = np.cross(v1,v2)
-        d = np.dot(c,normal)
+        d = np.dot(coord,normal)
         a = normal[0]
         b = normal[1]
         c = normal[2]
@@ -365,44 +371,49 @@ def visualiseSingle(rotatedBone, a,b,c,d, slice_no):
     py.offline.iplot(fig)
     return None
 
-def correctPlaneParams(angle1, angle2, n, c1, c2):
-    def rotationMatrix(axis, theta):
-        """
-        Return the rotation matrix associated with counterclockwise rotation about
-        the given axis by theta radians.
-        """
-        axis = np.asarray(axis)
-        axis = axis/math.sqrt(np.dot(axis, axis))
-        a = math.cos(theta/2.0)
-        b, c, d = -axis*math.sin(theta/2.0)
-        aa, bb, cc, dd = a*a, b*b, c*c, d*d
-        bc, ad, ac, ab, bd, cd = b*c, a*d, a*c, a*b, b*d, c*d
-        return np.array([[aa+bb-cc-dd, 2*(bc+ad), 2*(bd-ac)],
-                         [2*(bc-ad), aa+cc-bb-dd, 2*(cd+ab)],
-                         [2*(bd+ac), 2*(cd-ab), aa+dd-bb-cc]])
+def correctPlaneParams(angle1, angle2, n, c1, c2, arrayShape):
+    import math
     
-    theta1 = -angle1/360.*2*np.pi
-    theta2 = -angle2/360.*2*np.pi
-    
-    if abs(angle1) < 45:
-        axis = [0,0,1]
-        n1 = np.dot(rotationMatrix(axis,theta2*(1.-np.sin(theta1))), n)
-        axis = [0,-1,0]
-        normal = np.dot(rotationMatrix(axis,theta1), n1)
+    a = (-angle1-90.)/360.*2*np.pi
 
-    elif abs(angle1) > 45:
-        axis = [0,0,1]
-        n1 = np.dot(rotationMatrix(axis,theta2*(np.sin(theta1))), n)
-        axis = [0,-1,0]
-        normal = np.dot(rotationMatrix(axis,np.pi/2.-theta1), n1)
+    zrotM = np.asarray([[np.cos(a), -np.sin(a), 0.],
+                      [np.sin(a),  np.cos(a), 0.],
+                      [0.,          0.      , 1.]])  
 
+    yrotM = np.array([[np.cos(a),  0,         0],
+                      [np.sin(a),  1,         0],
+                      [-np.sin(a), 0, np.cos(a)]])  
+
+    R = np.dot(zrotM,yrotM)
+    n1 = np.dot(R, n)
+
+    a = (-angle2-90.)/360.*2*np.pi
+
+    zrotM = np.asarray([[np.cos(a), -np.sin(a), 0.],
+                      [np.sin(a),  np.cos(a), 0.],
+                      [0.,          0.      , 1.]])  
+
+    yrotM = np.array([[np.cos(a),  0,         0],
+                      [np.sin(a),  1,         0],
+                      [-np.sin(a), 0, np.cos(a)]])  
+
+    R = np.dot(zrotM,yrotM)
+    normal = np.dot(R, n1)
+    normal = normal/np.linalg.norm(normal)
     c = 0.5*(c1+c2)
-    c = np.roll(c,1)
-    d = np.dot(c,normal)
+    cc1 = np.roll(c,1)
+#    cc2 = np.roll(c,-1)
+#    dist1 = np.linalg.norm(np.array(arrayShape)-cc1)
+#    dist2 = np.linalg.norm(np.array(arrayShape)-cc2)
+#    if dist1<dist2:
+#        c = cc1
+#    else:
+#        c = cc2 # change this line if you change your mind
+    d = np.dot(c, normal)
     a = normal[0]
     b = normal[1]
     c = normal[2]
-    return a,b,c,d
     
+    return a,b,c,d, normal
     
     

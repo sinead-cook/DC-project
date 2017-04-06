@@ -36,7 +36,7 @@ class master:
             self.scan.bone        = core.thresholdnp(self.scan.array, 1100, 1500)
             self.scan.softtissue  = core.thresholdnp(self.scan.array, 0, 80)
         elif self.path.endswith('.dcm'):
-            self.scan.array, self.scan.pixelspacing, self.scan.affine = core.dicom2np(self.path)
+            self.scan.array, self.scan.pixelspacing, self.scan.origin = core.dicom2np(self.path)
             self.scan.bone       = core.thresholdnp(self.scan.array, 1100, 1500)
             self.scan.softtissue = core.thresholdnp(self.scan.array, 0, 80)
         elif self.path.endswith('.nrrd'):
@@ -68,23 +68,36 @@ class master:
         angle1, angle2 = findeyes.anglesFromEyes(self.c1Reshaped,self.c2Reshaped)
         # next find a new skull array (rotatedBone) that has been rotated so it is facing up (and the centre of the eyes lie in the same plane)
         _, rotatedBone = findeyes.correctSkews(angle1, angle2, bone)
+        _, rotatedSofttissue = findeyes.correctSkews(angle1, angle2, softtissue)
         # angles, and coords (isotropic coord system) of the centre of the ellipses that are fitted to the skull. 
+        
+        print '\n','Eyes found. Find ellipses...','\n'
+
         angs, xcentroids, ycentroids = core.ellipses(rotatedBone)
         # 'unreshaping' the results, so that the midplane will fit the original array
         # the slices of interest and their corresponding angles 
-        slices, sliceAngles = core.selectellipsesrange(angs)
+        slices, sliceAngles = core.selectEllipsesRange(angs)
         # the coordinates of the centroids of the ellipses in the slices of interest
         headx = [xcentroids[i] for i in slices] 
         heady = [ycentroids[i] for i in slices] 
-        print '\n','Eyes found. Find ellipses...','\n'
+        
+        print '\n','Ellipses found. Find eyes in rotated system...','\n'
+           
+        H, edges, histData2   = findeyes.hist3dAll(rotatedSofttissue)
+        # firstEyeRange, secondEyeRange contains the geometric space of the eyes (in the coordinate system we are currently using)
+        firstEyeRange, secondEyeRange, certainty  = findeyes.ranges(H,edges)
+        # we can now find the coordinates of the center of the eyes, using the histogram data
+        self.c1ReshapedRotated,self.c2ReshapedRotated = findeyes.coords(histData2, firstEyeRange, secondEyeRange)
+        
+        print '\n','Ellipses found. Find eyes in rotated system...','\n'        
         
         # find a midplane using a combination of the eyes (for location) and the ellipse angles
-        a,b,c,d, normal = core.findPlaneFromEllipses(self.scan.bone, self.c1Reshaped, self.c2Reshaped, slices, headx, heady, sliceAngles)
+        a,b,c,d, normal = core.findPlaneFromEllipses(self.scan.bone, self.c1ReshapedRotated, self.c2ReshapedRotated, slices, headx, heady, sliceAngles)
         # put this plane back into the original coordinate system
         theta1 = angle1/360.*2*np.pi # angles in radians
         theta2 = angle2/360.*2*np.pi
         
-        a,b,c,d = core.correctPlaneParams(angle1, angle2, normal, c1, c2)
+        a,b,c,d = core.correctPlaneParams(angle1, angle2, normal, self.c1, self.c2)
         self.scan.params = a,b,c,d
         print '\n','Midplane found...','\n'
                 
@@ -106,8 +119,15 @@ class master:
         
         mask = np.swapaxes(mask, 0, 2)
         img = sitk.GetImageFromArray(mask)
-        img.CopyInformation(sitk.ReadImage(self.path))
-        midplaneMaskPath = os.path.join(os.path.split(self.path)[0], 'midplane.nii.gz')
+        
+        if self.path.endswith('.dcm'):
+            dcmimg = sitk.ReadImage(self.path)
+            img.SetDirection(dcmimg.GetDirection())
+            img.SetOrigin(self.scan.origin)
+            img.SetSpacing(self.scan.pixelspacing)
+        else:
+            img.CopyInformation(sitk.ReadImage(self.path))
+        midplaneMaskPath = os.path.join(os.path.split(self.path)[0], 'midplane.mha')
         sitk.WriteImage(img, midplaneMaskPath)
         print '\n','Midplane mask saved at ', midplaneMaskPath,'\n'
 

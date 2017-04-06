@@ -63,21 +63,37 @@ def allSlices(axis_no, softtissue):
     return circlesData
 
 
-def indexedData(circlesData, numCircles):
+def indexedData(circlesData):
     # hist_data is the same size as circles_data but has an additional column (for the explicit 
     # slice number). hist_data is x,y,z,r
-    histData = np.zeros((circlesData.shape[0], circlesData.shape[1], circlesData.shape[2]+1))
- 
-    for i in range(histData.shape[0]):
+
+    histData2c = np.zeros((circlesData.shape[0], circlesData.shape[1], circlesData.shape[2]+1))
+    histData3c = histData2c
+    histData4c = histData2c
+    
+    numCircles = 2
+    for i in range(histData2c.shape[0]):
+        histData2c[i,0:numCircles, 0:2] = circlesData[i,0:numCircles, 0:2] 
+        #first 2 cols of every slice in circles data assigned to first 2 cols of 
+        # every slice in hist_data
+        histData2c[i,0:numCircles, 3] = circlesData[i,0:numCircles, 2] 
+        # 3rd col of every slice in circles data assigned to 4rd col of every slice 
+        # in hist_data (radii data)
+        histData2c[i,0:numCircles,2]= i*2 
+        # fill in index and stretch by factor of 2
         
-        histData[i,0:numCircles+1, 0:2] = circlesData[i,0:numCircles+1, 0:2] 
-        #first 2 cols of every slice in circles data assigned to first 2 cols of every slice in hist_data
-        
-        histData[i,0:numCircles+1, 3] = circlesData[i,0:numCircles+1, 2] 
-        # 3rd col of every slice in circles data assigned to 4rd col of every slice in hist_data (radii data)
-        
-        histData[i,0:numCircles+1,2]= i*2 # fill in index and stretch by factor of 2
-    return histData
+    numCircles = 3
+    for i in range(histData3c.shape[0]):
+        histData3c[i,0:numCircles, 0:2] = circlesData[i,0:numCircles, 0:2] 
+        histData3c[i,0:numCircles, 3] = circlesData[i,0:numCircles, 2] 
+        histData3c[i,0:numCircles,2]= i*2 
+    numCircles = 4
+    for i in range(histData4c.shape[0]):
+        histData4c[i,0:numCircles, 0:2] = circlesData[i,0:numCircles, 0:2] 
+        histData4c[i,0:numCircles, 3] = circlesData[i,0:numCircles, 2] 
+        histData4c[i,0:numCircles,2]= i*2 
+
+    return histData2c, histData3c, histData4c
 
 def reshape(hist_data0, hist_data1, hist_data2):
         # if axis_no is 0: 1st column is z, 2nd column is y, 3rd column is x. 
@@ -110,17 +126,19 @@ def circlesData(softtissue, numCircles):
     """ Fixes hist_data dimensions """
     
     circlesData0 = allSlices(0, softtissue) # axis 0 circle detection
-    histData0 = indexedData(circlesData0, numCircles)
+    histData02c, histdata03c, histdata04c = indexedData(circlesData0)
 
     circlesData1 = allSlices(1, softtissue) # axis 1 circle detection
-    histData1 = indexedData(circlesData1, numCircles)
+    histData12c, histdata13c, histdata14c = indexedData(circlesData1)
 
     circlesData2 = allSlices(2, softtissue) # axis 1 circle detection
-    histData2 = indexedData(circlesData2, numCircles)
+    histData22c, histdata23c, histdata24c = indexedData(circlesData2)
     
-    histData = reshape(histData0,histData1,histData2)
+    histData2 = reshape(histData02c,histData12c,histData22c)
+    histData3 = reshape(histdata03c, histdata13c, histdata23c)
+    histData4 = reshape(histdata04c, histdata14c, histdata24c)
  
-    return histData
+    return histData2, histData3, histData4
 
 def hist3d(hist_data):
     H, edges = np.histogramdd(hist_data[:, 0:3]) 
@@ -157,9 +175,15 @@ def hist3dAll(softtissue):
     
     # circle_num should always be greater than 1. circle_num = 1 means 2 circles being picked out. 
     
-    histData2 = circlesData(softtissue, 1) # 2c = 2 circles
-    histData3 = circlesData(softtissue, 2) 
-    histData4 = circlesData(softtissue, 3) 
+    histData2, histData3, histData4 = circlesData(softtissue, 1) # 2c = 2 circles
+#    print '\n','Circle detection for 2 circles complete','\n'
+
+#    histData3 = circlesData(softtissue, 2) 
+#    print '\n','Finding eyes part 2 of 3 complete','\n'
+
+#    histData4 = circlesData(softtissue, 3)
+#    print '\n','Finding eyes part 3 of 3 complete','\n'
+
     data2c, H2c, edges2c = hist3d(histData2)
     data3c, H3c, edges3c = hist3d(histData3)
     data4c, H4c, edges4c = hist3d(histData4)
@@ -291,47 +315,37 @@ def checkcoords(c1, c2, softtissue):
     
     return None
 
-def anglesFromEyes(c1,c2):
+def anglesFromEyes(c1,c2, arrayShape):
     # point that the plane goes through, p
-    p = (c1+c2)/2
-    normal = (c2-c1)
-    normal = normal/np.sum(np.power(normal,2))
-    # a plane is ax+by+cz = d - find d
-    d = np.dot(p,normal)
-    # superpose plane onto slices
-    a = normal[0]
-    b = normal[1]
-    c = normal[2]
-    # plane equation is ax+by+cz = d
-
-    slice_no = 1
-
-    if a != 0:
-        adj = (d-b*slice_no-c)/a - (d-b*slice_no)/a # opp is 1
-    else:
-        adj = 0
-    if adj == 0:
-        angle1rad = 0
-    else:
-        angle1rad = np.arctan(1/adj)
-    angle1 = angle1rad/(2*np.pi)*360
+    c = 0.5*(c1+c2)
+    c1 = np.roll(c1,1)
+    c2 = np.roll(c2,1)
+#    dist1 = np.linalg.norm(np.array(arrayShape)-cc1)
+#    dist2 = np.linalg.norm(np.array(arrayShape)-cc2)
+#    if dist1<dist2:
+#        c1 = np.roll(c1, 1)
+#        c2 = np.roll(c2, 1)
+#    else:
+#        c1 = np.roll(c1, -1)
+#        c2 = np.roll(c2, -1)    
+    normal = (c1-c2)
+    normal = normal/np.linalg.norm(normal)
     
-    if a != 0:
-        opp = (d-c*slice_no-b)/a - (d-c*slice_no)/a # adj is 1
-    else:
-        opp = 0
-    angle2rad = np.arctan(opp)
-    angle2 = angle2rad/(2*np.pi)*360
+    zaxis = np.array([0,0,1])
+    cosangle = np.dot(normal, zaxis)
+    angle = np.arccos(cosangle)
+    angle1 = angle*360/np.pi/2.
+
+    xaxis = np.array([0,1,0])
+    cosangle = np.dot(normal, xaxis)
+    angle = np.arccos(cosangle)
+    angle2 = angle*360/np.pi/2.
+    
     return angle1, angle2 #angles are in degrees
 
 def correctSkews(angle1, angle2, array):
     from scipy.ndimage.interpolation import rotate
-    if abs(angle1) < 45:
-        rotated1 = rotate(array, angle1, mode='nearest', axes=(2,0))
-        angle1rad = angle1/360*2*np.pi
-        rotated2 = rotate(rotated1, angle2*(1-np.sin(angle1rad)),mode='nearest', axes=(0,1)) #  can add back in
-    elif abs(angle1) > 45:
-        rotated1 = rotate(array, 90-angle1, mode='nearest', axes=(2,0))
-        angle1rad = angle1/360*2*np.pi
-        rotated2 = rotate(rotated1, angle2*(np.sin(angle1rad)),mode='nearest', axes=(0,1)) # mode='nearest', can add back in
+    rotated1 = rotate(array, angle1, mode='nearest', axes=(0,1))
+    angle1rad = angle1/360*2*np.pi
+    rotated2 = rotate(rotated1, angle2 ,mode='nearest', axes=(2,0))
     return rotated1, rotated2
