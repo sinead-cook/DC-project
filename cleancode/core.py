@@ -259,7 +259,7 @@ def findPlaneFromEllipses(bone, c1, c2, slices, head_x, head_y, head_angles):
     bone[abs(bone)<0.01]    = 0
     bone[~np.isfinite(bone)]= 0
     coord = (c1+c2)/2.0
-    coord = np.roll(coord,1)
+    coord = np.array([coord[1], coord[0], coord[2]])
     if slices != []:
         print '\n','Using ellipses to find midplane','\n'
         x=[]
@@ -271,7 +271,7 @@ def findPlaneFromEllipses(bone, c1, c2, slices, head_x, head_y, head_angles):
         centroids_array = np.concatenate((np.array([head_x,head_y,slices]).T, np.array([x,y,remaining_z]).T),axis=0).T
         centroids_array[~np.isfinite(centroids_array)]=0
         centroids_array[abs(centroids_array)<0.01] = 0
-        centroids_array = core.rejectOutliers(centroids_array)
+        centroids_array = rejectOutliers(centroids_array)
         from scipy.optimize import curve_fit
         def f(x,A,B):
             return A*x + B
@@ -371,49 +371,42 @@ def visualiseSingle(rotatedBone, a,b,c,d, slice_no):
     py.offline.iplot(fig)
     return None
 
-def correctPlaneParams(angle1, angle2, n, c1, c2, arrayShape):
+
+def correctPlaneParams(angle1, angle2, n, c1, c2, arrayshape):
     import math
     
-    a = (-angle1-90.)/360.*2*np.pi
-
+    ang1rad = angle1/360.*2*np.pi
+    ang2rad = angle2/360.*2*np.pi
+    
+    a = ang1rad*np.cos(ang2rad)
+    
+    yrotM = np.array([[np.cos(a),  0, -np.sin(a)],
+                      [0,          1,         0],
+                      [np.sin(a), 0, np.cos(a)]])
+    
+    a = ang2rad
+    
     zrotM = np.asarray([[np.cos(a), -np.sin(a), 0.],
                       [np.sin(a),  np.cos(a), 0.],
                       [0.,          0.      , 1.]])  
-
-    yrotM = np.array([[np.cos(a),  0,         0],
-                      [np.sin(a),  1,         0],
-                      [-np.sin(a), 0, np.cos(a)]])  
-
+    
     R = np.dot(zrotM,yrotM)
-    n1 = np.dot(R, n)
-
-    a = (-angle2-90.)/360.*2*np.pi
-
-    zrotM = np.asarray([[np.cos(a), -np.sin(a), 0.],
-                      [np.sin(a),  np.cos(a), 0.],
-                      [0.,          0.      , 1.]])  
-
-    yrotM = np.array([[np.cos(a),  0,         0],
-                      [np.sin(a),  1,         0],
-                      [-np.sin(a), 0, np.cos(a)]])  
-
-    R = np.dot(zrotM,yrotM)
-    normal = np.dot(R, n1)
+    normal = np.dot(R, n)
     normal = normal/np.linalg.norm(normal)
     c = 0.5*(c1+c2)
-    cc1 = np.roll(c,1)
-#    cc2 = np.roll(c,-1)
-#    dist1 = np.linalg.norm(np.array(arrayShape)-cc1)
-#    dist2 = np.linalg.norm(np.array(arrayShape)-cc2)
+    mideyes = np.array([c[1], c[0], c[2]])
+#    dist1 = np.linalg.norm(np.roll(c,1)-np.array(arrayshape)/2.)
+#    dist2 = np.linalg.norm(np.roll(c,-1)-np.array(arrayshape)/2.)
 #    if dist1<dist2:
-#        c = cc1
-#    else:
-#        c = cc2 # change this line if you change your mind
-    d = np.dot(c, normal)
+#        mideyes = np.roll(c,1)
+#    else: 
+#        mideyes = np.roll(c,-1)
+    
+    d = np.dot(mideyes, normal)
     a = normal[0]
     b = normal[1]
     c = normal[2]
     
-    return a,b,c,d, normal
+    return a,b,c,d, mideyes
     
     
