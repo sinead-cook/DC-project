@@ -281,9 +281,8 @@ def findPlaneFromEllipses(bone, c1, c2, slices, head_x, head_y, head_angles):
         z = np.median(slices)
         x = A_x1*z + B_x1
         y = A_y1*z + B_y1
-#        # point that the plane goes through, p
-#        p = np.array([x, y, z]) # coordinates when z = mean(indices)
-#        print 'p = ', p
+#        point that the plane goes through, p
+        p = np.array([x, y, z]) # coordinates when z = mean(indices)
         v1 = np.array([A_x1/2, A_y1/2, 1])
         v1 = v1/np.sqrt((np.sum(np.power(v1,2))))
 #        print 'v1 = ', v1
@@ -318,7 +317,7 @@ def findPlaneFromEllipses(bone, c1, c2, slices, head_x, head_y, head_angles):
         a = normal[0]
         b = normal[1]
         c = normal[2]
-    return a,b,c,d,normal
+    return a,b,c,d,normal, centroids_array
 
 def visualiseSingle(rotatedBone, a,b,c,d, slice_no):
     import plotly as py
@@ -372,41 +371,44 @@ def visualiseSingle(rotatedBone, a,b,c,d, slice_no):
     return None
 
 
-def correctPlaneParams(angle1, angle2, n, c1, c2, arrayshape):
+def correctPlaneParams(angle1, angle2, n, c1Reshaped, c2Reshaped, pixelspacing):
     import math
-    
+        
     ang1rad = angle1/360.*2*np.pi
     ang2rad = angle2/360.*2*np.pi
     
-    a = ang1rad*np.cos(ang2rad)
+    rotAngle = np.sin(ang2rad)*ang1rad-np.pi/2.
+
+    while rotAngle<=-np.pi/4.: #skews are never that big
+        rotAngle = rotAngle+np.pi/2.
+
+    a = -rotAngle
     
     yrotM = np.array([[np.cos(a),  0, -np.sin(a)],
                       [0,          1,         0],
                       [np.sin(a), 0, np.cos(a)]])
     
-    a = ang2rad
+    a = -ang2rad
     
-    zrotM = np.asarray([[np.cos(a), -np.sin(a), 0.],
-                      [np.sin(a),  np.cos(a), 0.],
+    zrotM = np.asarray([[np.cos(a), np.sin(a), 0.],
+                      [-np.sin(a),  np.cos(a), 0.],
                       [0.,          0.      , 1.]])  
     
-    R = np.dot(zrotM,yrotM)
-    normal = np.dot(R, n)
+    n1 = np.dot(yrotM,n)
+    n2 = np.dot(zrotM,n1)
+    normal = n2
+    normal = np.true_divide(normal, pixelspacing)
     normal = normal/np.linalg.norm(normal)
-    c = 0.5*(c1+c2)
+
+    c = 0.5*(c1Reshaped+c2Reshaped)
     mideyes = np.array([c[1], c[0], c[2]])
-#    dist1 = np.linalg.norm(np.roll(c,1)-np.array(arrayshape)/2.)
-#    dist2 = np.linalg.norm(np.roll(c,-1)-np.array(arrayshape)/2.)
-#    if dist1<dist2:
-#        mideyes = np.roll(c,1)
-#    else: 
-#        mideyes = np.roll(c,-1)
+    mideyes = np.true_divide(mideyes, pixelspacing)
     
     d = np.dot(mideyes, normal)
     a = normal[0]
     b = normal[1]
     c = normal[2]
     
-    return a,b,c,d, mideyes
+    return a,b,c,d, normal, n1, n2
     
     
