@@ -44,11 +44,8 @@ def dicom2np(path):
     ImagePositionPatientLast  = RefDsLast.ImagePositionPatient
     # Load dimensions based on the number of rows, columns, 
     # and slices (along the Z axis)
+
     ConstPixelDims = (int(RefDsFirst.Rows), int(RefDsFirst.Columns), len(lstFilesDCM))
-    
-    # Load spacing values (in mm)
-    ConstPixelSpacing = (float(RefDsFirst.PixelSpacing[0]), float(RefDsFirst.PixelSpacing[1]), 
-        float(RefDsFirst.SliceThickness))
     
     # The array is sized based on 'ConstPixelDims'
     array = np.zeros(ConstPixelDims, dtype=RefDsFirst.pixel_array.dtype)
@@ -64,18 +61,24 @@ def dicom2np(path):
         
     T1 = np.array(ImagePositionPatientFirst).astype(float)
     TN = np.array(ImagePositionPatientLast).astype(float)
-    thirdCol = np.divide(T1-TN,1.-float(array.shape[2]))
-
-    F1 = np.array(RefDsFirst.ImageOrientationPatient[:3]).astype(float)
-    F2 = np.array(RefDsFirst.ImageOrientationPatient[3:6]).astype(float)
-    affine = np.zeros((4,4))
-    affine[:,1][:3] = -F1*ConstPixelSpacing[0]
-    affine[:,0][:3] = -F2*ConstPixelSpacing[1]
-    affine[:,2][:3] = thirdCol
-    affine[:,3][:3] = [-T1[0], -T1[1], T1[2]]
-    affine[3,3] = 1.    
+    zaffine = np.divide(T1-TN,1.-float(array.shape[2]))
+    zaffinePerp = zaffine[2] #z affine resolved perpendicular to image
     
-    return(array, ConstPixelSpacing, RefDsFirst.ImagePositionPatient)
+    # Load spacing values (in mm)
+    ConstPixelSpacing = (float(RefDsFirst.PixelSpacing[0]), float(RefDsFirst.PixelSpacing[1]), 
+                         float(zaffinePerp))
+    
+
+#    F1 = np.array(RefDsFirst.ImageOrientationPatient[:3]).astype(float)
+#    F2 = np.array(RefDsFirst.ImageOrientationPatient[3:6]).astype(float)
+#    affine = np.zeros((4,4))
+#    affine[:,1][:3] = -F1*ConstPixelSpacing[0]
+#    affine[:,0][:3] = -F2*ConstPixelSpacing[1]
+#    affine[:,2][:3] = zaffine
+#    affine[:,3][:3] = [-T1[0], -T1[1], T1[2]]
+#    affine[3,3] = 1.    
+    
+    return(array, ConstPixelSpacing, [-T1[0], -T1[1], T1[2]])
 
 def nifti2np(pathNifti):
     """ 
@@ -254,6 +257,7 @@ def selectEllipsesRange(angles):
 #        slices = ['use eyes']
     return slices, slice_angles
 
+
 def findPlaneFromEllipses(bone, c1, c2, slices, head_x, head_y, head_angles): 
     import findeyes as fer
     bone[abs(bone)<0.01]    = 0
@@ -317,7 +321,8 @@ def findPlaneFromEllipses(bone, c1, c2, slices, head_x, head_y, head_angles):
         a = normal[0]
         b = normal[1]
         c = normal[2]
-    return a,b,c,d,normal, centroids_array
+    return a,b,c,d,normal
+
 
 def visualiseSingle(rotatedBone, a,b,c,d, slice_no):
     import plotly as py
@@ -373,42 +378,48 @@ def visualiseSingle(rotatedBone, a,b,c,d, slice_no):
 
 def correctPlaneParams(angle1, angle2, n, c1Reshaped, c2Reshaped, pixelspacing):
     import math
-        
+            
     ang1rad = angle1/360.*2*np.pi
     ang2rad = angle2/360.*2*np.pi
-    
-    rotAngle = np.sin(ang2rad)*ang1rad-np.pi/2.
+            
+    rotAngle = np.sin(ang2rad)*angle1-90
 
-    while rotAngle<=-np.pi/4.: #skews are never that big
-        rotAngle = rotAngle+np.pi/2.
+    while rotAngle<=-45: #skews are never that big
+        rotAngle = rotAngle+90
 
-    a = -rotAngle
+    rotAngle = rotAngle/360.*2*np.pi
     
-    yrotM = np.array([[np.cos(a),  0, -np.sin(a)],
-                      [0,          1,         0],
-                      [np.sin(a), 0, np.cos(a)]])
+    a = rotAngle
     
-    a = -ang2rad
+    yrotM = np.array([[np.cos(a),  0,-np.sin(a) ], #scipy's definition on y is the cartesian x axis
+                      [0,          1,        0  ],
+                      [np.sin(a),  0, np.cos(a)]])
     
-    zrotM = np.asarray([[np.cos(a), np.sin(a), 0.],
-                      [-np.sin(a),  np.cos(a), 0.],
+#    yrotM = np.array([[1,          0,        0  ], #scipy's definition on y is the cartesian x axis
+#                      [0,  np.cos(a), -np.sin(a)],
+#                      [0,  np.sin(a), np.cos(a)]])
+    a = ang2rad
+    
+    zrotM = np.asarray([[np.cos(a), -np.sin(a), 0.],
+                      [np.sin(a),  np.cos(a), 0.],
                       [0.,          0.      , 1.]])  
     
-    n1 = np.dot(yrotM,n)
-    n2 = np.dot(zrotM,n1)
-    normal = n2
+    R = np.dot(zrotM, yrotM)
+    n1 = np.dot(yrotM, n)
+    normal = np.dot(R, n)
+    n2 = normal
     normal = np.true_divide(normal, pixelspacing)
     normal = normal/np.linalg.norm(normal)
 
     c = 0.5*(c1Reshaped+c2Reshaped)
     mideyes = np.array([c[1], c[0], c[2]])
     mideyes = np.true_divide(mideyes, pixelspacing)
-    
+
     d = np.dot(mideyes, normal)
     a = normal[0]
     b = normal[1]
     c = normal[2]
     
-    return a,b,c,d, normal, n1, n2
+    return a,b,c,d,normal, n1, n2
     
     

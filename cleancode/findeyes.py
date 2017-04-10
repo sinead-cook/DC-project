@@ -318,8 +318,8 @@ def checkcoords(c1, c2, softtissue):
 def anglesFromEyes(c1,c2, arrayShape):
     # point that the plane goes through, p
     c = 0.5*(c1+c2)
-    c1 = np.array([c1[1], c1[0], c1[2]])
-    c2 = np.array([c2[1], c2[0], c2[2]])
+#    c1 = np.array([c1[1], c1[0], c1[2]])
+#    c2 = np.array([c2[1], c2[0], c2[2]])
 #    dist1 = np.linalg.norm(np.array(arrayShape)-cc1)
 #    dist2 = np.linalg.norm(np.array(arrayShape)-cc2)
 #    if dist1<dist2:
