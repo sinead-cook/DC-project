@@ -69,16 +69,16 @@ def dicom2np(path):
                          float(zaffinePerp))
     
 
-#    F1 = np.array(RefDsFirst.ImageOrientationPatient[:3]).astype(float)
-#    F2 = np.array(RefDsFirst.ImageOrientationPatient[3:6]).astype(float)
-#    affine = np.zeros((4,4))
-#    affine[:,1][:3] = -F1*ConstPixelSpacing[0]
-#    affine[:,0][:3] = -F2*ConstPixelSpacing[1]
-#    affine[:,2][:3] = zaffine
-#    affine[:,3][:3] = [-T1[0], -T1[1], T1[2]]
-#    affine[3,3] = 1.    
+    F1 = np.array(RefDsFirst.ImageOrientationPatient[:3]).astype(float)
+    F2 = np.array(RefDsFirst.ImageOrientationPatient[3:6]).astype(float)
+    affine = np.zeros((4,4))
+    affine[:,1][:3] = -F1*ConstPixelSpacing[0]
+    affine[:,0][:3] = -F2*ConstPixelSpacing[1]
+    affine[:,2][:3] = zaffine
+    affine[:,3][:3] = [-T1[0], -T1[1], T1[2]]
+    affine[3,3] = 1.    
     
-    return(array, ConstPixelSpacing, [-T1[0], -T1[1], T1[2]])
+    return array, ConstPixelSpacing, [-T1[0], -T1[1], T1[2]], lstFilesDCM[0], affine
 
 def nifti2np(pathNifti):
     """ 
