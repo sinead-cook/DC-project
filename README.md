@@ -1,22 +1,14 @@
-For the imaging team:
+This code takes in inputs of CT scans and outputs information about that CT scan and masks. It is optimised to work with intact (before craniotomy or craniectomy) CT scans with acute subdural haematomas. It will not pick up multiple disconnected bleeds.
 
-1. Useful code is in '/cleancode/' folder
-2. The files you want are 'midplanefinderbatch.ipynb' and 'symmetryanalysisbatch.ipynb'
-3. For both these files ('midplanefinderbatch.ipynb' and 'symmetryanalysisbatch.ipynb'), all you have to do is put the path of the scan(s) you want into 'paths'. 
-4. Run 'midplanefinderbatch.ipynb' to save a midplane binary for a given scan.
-5. Run 'symmetryanalysisbatch.ipynb' to get out all the values for the symmetry analysis, and also save all the parenchyma, ventricle and haematoma masks. The code will print out something like: 
+Information about scripts:
+midplanefinder.ipynb is an interactive way of finding the midplane of a scan.
+midplanefinderbatch.ipynb works the same as midplanefinder but can process multiple scans
+symmetryanalysis.ipynb
 
-                    ['ScanB', 'w1 = 287.118632928', 'w2 = 253.708675649', 'w3 = 66',
-                    'Volume of haematoma on LHS is 101216.934341',
-                    'Volume of haematoma on RHS is 11828.987111',
-                    'Volume of brain on LHS is 736982.079215',
-                    'Volume of brain on RHS is 774164.849771',
-                    'Volume of CSF in ventricles on LHS is 19655.0864758',
-                    'Volume of CSF in ventricles on RHS is 32386.77633'],
-                    
-  w1, w2 and w3 are the x,y,z coordinates of the ventricle centroid. You can type these coords into ITK snap to get the point.
-  These values will be saved in 'info.npy' (which is not a very useful format). You can load this file by typing in :
-    import numpy as np
-    info =  np.load('info.npy') 
- It is best to copy and paste these values into a spreadsheet or a np array so you can analyse them properly later (and keep    
- track of all your scans).
+To build the mac app:
+  1. Clone the repository
+  2. Set up an environment so that you can run 'startupdlg.py' on your computer. The easiest way to do this is to download          anaconda, and create a conda environment. The most unusual dependencies are:
+     simpleITK, numpy, matplotlib, nibabel, opencv 2.4 (conda install -c menpo opencv=2.4.11) (make sure you configure this        last).
+  3. Download pyinstaller into your environment
+  4. Open a terminal window, activate your environment and go to the folder where the repository is located. Type in                'pyinstaller startupdlg.spec' to build the app.
+  5. The app will be located in 'dist'
