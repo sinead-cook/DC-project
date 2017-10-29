@@ -32,7 +32,6 @@ class master:
 
         self.scan = scandata.Scan()
         self.mask = scandata.Mask()
-        self.methods = scandata.Methods()
     
         self.p_vol = np.nan
         self.b_vol = np.nan
@@ -63,21 +62,6 @@ class master:
                 pathHead = os.path.split(os.path.split(self.scan.path)[0])[0]
             savePath = os.path.join(pathHead, saveName)
             sitk.WriteImage(img, savePath)
-
-    def symmetryOutputs(self, tissueMask, saveName=None):
-
-        left_mask = np.multiply(tissueMask, self.midplane_split==0)
-        right_mask = np.multiply(tissueMask, self.midplane_split==1)
-
-        if self.methods.lrTissueMasks == True:
-            self.saveMask(left_mask, 'left_'+saveName)
-            self.saveMask(right_mask, 'right_'+saveName)
-
-        if self.methods.totalSymmVolumes == True:
-            left_volume = (left_mask[left_mask!=0]).size*np.prod(self.scan.pixelspacing)
-            right_volume = (right_mask[right_mask!=0]).size*np.prod(self.scan.pixelspacing)
-
-        return left_volume, right_volume
 
     def extract(self, thresholded):
         import subprocess
@@ -322,260 +306,28 @@ class master:
 
         print 'Midplane found for original coordinates.'
 
-        if self.methods.midplaneMask==True:
-            print 'Saving midplane mask...'
+        print 'Saving midplane mask...'
 
-            crossShape = self.scan.array[:,:,0].shape
-            self.mask.midplane = np.zeros(self.scan.array.shape)
+        crossShape = self.scan.array[:,:,0].shape
+        self.mask.midplane = np.zeros(self.scan.array.shape)
 
-            if abs(normal[1])>abs(normal[0]):
-                for i in range(self.scan.array.shape[2]):
-                    z = i
-                    mask1 = np.fromfunction(lambda x,y: y > (d-c*i-a*x)/b-2, crossShape)
-                    mask2 = np.fromfunction(lambda x,y: y < (d-c*i-a*x)/b+2, crossShape)
-                    maski = np.multiply(mask1, mask2)
-                    self.mask.midplane[:,:,i] = maski
+        if abs(normal[1])>abs(normal[0]):
+            for i in range(self.scan.array.shape[2]):
+                z = i
+                mask1 = np.fromfunction(lambda x,y: y > (d-c*i-a*x)/b-2, crossShape)
+                mask2 = np.fromfunction(lambda x,y: y < (d-c*i-a*x)/b+2, crossShape)
+                maski = np.multiply(mask1, mask2)
+                self.mask.midplane[:,:,i] = maski
 
-            if abs(normal[1])<abs(normal[0]):
-                for i in range(self.scan.array.shape[2]):
-                    z = i
-                    mask1 = np.fromfunction(lambda x,y: x > ((d-z*c-y*b)/a-2), crossShape)
-                    mask2 = np.fromfunction(lambda x,y: x < ((d-z*c-y*b)/a+2), crossShape)
-                    maski = np.multiply(mask1, mask2)
-                    self.mask.midplane[:,:,i] = maski
+        if abs(normal[1])<abs(normal[0]):
+            for i in range(self.scan.array.shape[2]):
+                z = i
+                mask1 = np.fromfunction(lambda x,y: x > ((d-z*c-y*b)/a-2), crossShape)
+                mask2 = np.fromfunction(lambda x,y: x < ((d-z*c-y*b)/a+2), crossShape)
+                maski = np.multiply(mask1, mask2)
+                self.mask.midplane[:,:,i] = maski
 
-            print 'Midplane mask created.','\n'
+        print 'Midplane mask created.','\n'
 
-            self.saveMask(self.mask.midplane, 'midplane.nii.gz')
+        self.saveMask(self.mask.midplane, 'midplane.nii.gz')
 
-    def volumeAnalysis(self):
-        print 'running vol analysis'
-        import scipy.ndimage as ndi
-
-        if self.methods.segmentation == True:
-            self.readInScan()
-        skin_mask = ndi.filters.gaussian_filter(self.scan.array, 1)
-        skin_mask = np.multiply(skin_mask, (self.scan.array>-200).astype(int))
-        array1 = np.multiply(skin_mask, (skin_mask>0.0).astype(int))
-        self.array1 = np.multiply(array1, (array1>-200).astype(int))
-
-    def skinOrbital(self):
-        # skull
-        skull_mask = self.array1>84.0
-        array1 = self.array1
-        array2 = np.multiply(array1, (array1<84.0).astype(int))
-        # orbital
-        orbital_mask = skull_mask
-
-        for i in range(5):
-            orbital_mask = bd(skull_mask)
-
-        array3 = np.multiply(array2, (orbital_mask==False).astype(int))
-
-        # cerebral ventricle
-        self.array4 = np.multiply(array3, (array3>0.0).astype(int))
-
-    def brainExtraction(self):
-
-        # BET FSL
-        array5 = self.extract(self.array4)
-
-        del self.array4
-        self.brain_mask = np.multiply(bc(bfh(bd(array5))).astype(int), array5)
-        self.b_vol = (self.brain_mask[self.brain_mask!=0]).size*np.prod(self.scan.pixelspacing)
-
-        print 'FSL BET tool complete'
-
-        if self.methods.wholeBrain==True and self.methods.tissueMasks==True: 
-            self.saveMask(self.brain_mask, 'wholeBrain_mask.nii.gz')
-
-        self.array5 = array5
-    def findingVentricles(self):
-
-        if self.methods.ventricles == True: # only find ventricles if user is interested in them
-            print 'finding ventricles'
-
-        # Ventricle Analysis
-            brainArea = []
-            for i in range(self.brain_mask.shape[2]):
-                brainArea.append(np.count_nonzero(self.brain_mask[:,:,i]))
-            midsliceIndex = np.argmax(brainArea)
-            brain_mask=self.brain_mask
-            # get ventricles
-            ventr_mask1 = np.multiply((brain_mask>0).astype(int), (brain_mask<22).astype(int))
-            ventr_mask2 = bd(ventr_mask1)
-            ventr_mask3 = be(ventr_mask2)
-            ventr_mask4 = bd(ventr_mask3)
-            ventr_loop = ventr_mask3
-            
-            for ind in range(1):
-                labels = skimage.measure.label(ventr_loop, connectivity=1)
-                props = skimage.measure.regionprops(labels)
-                v = [p.area for p in props]
-                x = 1
-                ind = v.index(max(v))
-                vcoords = props[ind].coords
-                while abs(np.mean(vcoords.transpose()[2])-midsliceIndex)>self.scan.array.shape[2]/10:
-                    ind = np.argsort(v)[-x]
-                    vcoords = props[ind].coords
-                    x = x+1
-                ventr_loop = np.zeros((self.scan.array.shape))
-                for i in range(len(vcoords)):
-                    a,b,c = vcoords[i]
-                    ventr_loop[a,b,c]=1
-                ventr_loop = bd(be(ventr_loop))
-
-
-            for i in range(3):
-                labels = skimage.measure.label(ventr_loop, connectivity=1)
-                props = skimage.measure.regionprops(labels)
-                v = [p.area for p in props]
-                ind = v.index(max(v))
-                vcoords = props[ind].coords
-                ventr_loop = np.zeros((self.scan.array.shape))
-                for i in range(len(vcoords)):
-                    a,b,c = vcoords[i]
-                    ventr_loop[a,b,c]=1
-                ventr_loop = bd(be(ventr_loop)) 
-                
-            labels = skimage.measure.label(ventr_loop, connectivity=1)
-            props = skimage.measure.regionprops(labels)
-            v = [p.area for p in props]
-            ind = v.index(max(v))
-            vcoords = props[ind].coords
-            ventr_loop = np.zeros((self.scan.array.shape))
-            for i in range(len(vcoords)):
-                a,b,c = vcoords[i]
-                ventr_loop[a,b,c]=1
-                
-            ventr_loop = bd(be(ventr_loop))
-
-            v_mask = bfh(ventr_loop)
-
-            self.v_mask = (v_mask).astype(np.float64)
-
-            print v_mask.shape
-            print self.scan.array.shape
-
-            if self.methods.tissueMasks==True:
-                print 'saving ventricle mask'
-                self.saveMask(self.v_mask, 'ventricles_mask.nii.gz')
-                print 'ventricle mask saved'
-
-            self.v_vol = (self.v_mask[self.v_mask!=0]).size*np.prod(self.scan.pixelspacing)
-
-
-    def findingHaematoma(self):
-        
-        if self.methods.haematoma == True or self.methods.parenchyma_mask == True:
-            # need to find haematoma to know the parenchyma mask or the haematoma mask
-            # get haematoma
-            print 'finding haematoma'
-            h_mask = (self.array5>50.0).astype(float)*1000
-            array6 = np.multiply(self.brain_mask, h_mask)
-            array7 = be(array6)
-            array8 = bc((array7))
-            array9 = bfh((array8))
-            array10 = bd(bd((array8)))
-            array11 = bfh(bd(array10))
-
-            h_loop = array11
-                
-            for i in range(4):
-                labels = skimage.measure.label(h_loop, connectivity=1)
-                props = skimage.measure.regionprops(labels)
-                h = [p.area for p in props]
-                ind = h.index(max(h))
-                hcoords = props[ind].coords
-                h_loop = np.zeros((self.scan.array.shape))
-                for i in range(len(hcoords)):
-                    a,b,c = hcoords[i]
-                    h_loop[a,b,c]=1
-                h_loop = be(h_loop)
-
-            labels = skimage.measure.label(h_loop, connectivity=1)
-            props = skimage.measure.regionprops(labels)
-            h = [p.area for p in props]
-            ind = h.index(max(h))
-            hcoords = props[ind].coords
-            h_loop = np.zeros((self.scan.array.shape))
-            for i in range(len(hcoords)):
-                a,b,c = hcoords[i]
-                h_loop[a,b,c]=1
-            h_loop = bd(h_loop)
-
-            h_mask = bfh(h_loop)
-
-            self.h_mask = (h_mask).astype(np.float64)
-
-            if self.tissueMasks == True:
-                self.saveMask(self.h_mask, 'haematoma_mask.nii.gz')
-
-            self.h_vol = (self.h_mask[self.h_mask!=0]).size*np.prod(self.scan.pixelspacing)
-
-    def savingExtraMasks(self):
-        
-        left_h_vol = np.nan
-        right_h_vol = np.nan
-        left_v_vol = np.nan
-        right_v_vol = np.nan
-        left_b_vol = np.nan
-        right_b_vol = np.nan
-        left_p_vol = np.nan
-        right_p_vol = np.nan
-
-        if self.methods.parenchyma == True:
-            parenchyma_mask = np.multiply(self.brain_mask, (self.h_mask==0).astype(np.float64)) # no haematoma
-            self.p_vol = (parenchyma_mask[parenchyma_mask!=0]).size*np.prod(self.scan.pixelspacing)
-            if self.tissueMasks == True:
-                self.saveMask(parenchyma_mask, 'parenchyma_mask.nii.gz')
-
-        if self.methods.symmetry == True: # this means that either lrTissueMasks is checked or that totalSymmVolumes is checked
-            # volumes analysis
-            a,b,c,d = self.scan.params
-            normal = [a,b,c]
-
-            crossShape = self.scan.array[:,:,0].shape
-
-            midplane = np.zeros(self.scan.array.shape)
-
-            if abs(normal[1])>abs(normal[0]):
-                for i in range(self.scan.array.shape[2]):
-                    z = i
-                    maski = np.fromfunction(lambda x,y: y > (d-c*i-a*x)/b, crossShape)
-                    midplane[:,:,i] = maski
-
-            if abs(normal[1])<abs(normal[0]):
-                for i in range(self.scan.array.shape[2]):
-                    z = i
-                    maski = np.fromfunction(lambda x,y: x > ((d-i*c-y*b)/a), crossShape)
-                    midplane[:,:,i] = maski
-
-            self.midplane_split = np.flip(midplane,2)
-            
-            if self.methods.haematoma == True:
-                left_h_vol, right_h_vol = self.symmetryOutputs(self.h_mask, 'haematoma_mask.nii.gz')
-                print 'left haematoma volume is ', left_h_vol
-                print 'right haematoma volume is ', right_h_vol
-
-            if self.methods.ventricles == True:
-                left_v_vol, right_v_vol = self.symmetryOutputs(self.v_mask, 'ventricles_mask.nii.gz')
-                print 'left ventricles volume is ', left_v_vol
-                print 'right ventricles volume is ', right_v_vol
-
-            if self.methods.wholeBrain == True:
-                left_b_vol, right_b_vol = self.symmetryOutputs(self.brain_mask, 'wholebrain_mask.nii.gz')
-                print 'left brain volume is ', left_b_vol
-                print 'right brain volume is ', right_b_vol
-
-            if self.methods.parenchyma == True:
-                left_p_vol, right_p_vol = self.symmetryOutputs(parenchyma_mask, 'parenchyma_mask.nii.gz')
-                print 'left parenchyma volume is ', left_p_vol
-                print 'right parenchyma volume is ', right_p_vol
-
-        p_vol = self.p_vol
-        b_vol = self.b_vol
-        v_vol = self.v_vol
-        h_vol = self.h_vol
-        self.output_i = [self.scan.path, left_h_vol, right_h_vol, left_v_vol, right_v_vol, left_b_vol, right_b_vol, left_p_vol, right_p_vol, h_vol, v_vol, b_vol, p_vol]
-           
