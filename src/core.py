@@ -1,0 +1,405 @@
+import numpy as np
+import nibabel as nib
+import os
+
+def rejectOutliers(data, m=2):
+    dx = np.abs(data[0] - np.median(data[0]))
+    dy = np.abs(data[1] - np.median(data[1]))
+    dz = np.abs(data[2] - np.median(data[2]))
+    mdevx = np.median(dx)
+    mdevy = np.median(dy)
+    mdevz = np.median(dz)
+    # if else is preventing from dividing by 0. if the median is 0, all
+    # the differences have to be 0 becaues dx, dy, dz don't contain
+    # negative numbers
+    sx = dx/mdevx if mdevx else 0. 
+    sy = dy/mdevy if mdevy else 0.
+    sz = dz/mdevz if mdevz else 0.
+    logicalx = sx<m
+    logicaly = sy<m
+    logicalz = sz<m
+    e = data*logicalx*logicaly*logicalz
+    data_return = np.array(e[:,e[1]!=0])
+    return data_return
+
+def dicom2np(path):
+    """ 
+    Converts a dicom file to a numpy array. 
+    Returns img_data, the numpy array and ConstPixelSpacing, 
+    a list of the spacing between datapoints in mm for each dimension
+    """
+    pathDicom = os.path.dirname(path)
+
+    import dicom
+    lstFilesDCM = []  # create an empty list
+    for dirName, subdirList, fileList in os.walk(pathDicom):
+        for filename in fileList:
+            if ".dcm" in filename.lower():  # check whether the file's DICOM
+                lstFilesDCM.append(os.path.join(dirName,filename))
+
+    # Get ref files
+    RefDsFirst = dicom.read_file(lstFilesDCM[0])
+    RefDsLast  = dicom.read_file(lstFilesDCM[-1])
+    ImagePositionPatientFirst = RefDsFirst.ImagePositionPatient
+    ImagePositionPatientLast  = RefDsLast.ImagePositionPatient
+    # Load dimensions based on the number of rows, columns, 
+    # and slices (along the Z axis)
+
+    ConstPixelDims = (int(RefDsFirst.Rows), int(RefDsFirst.Columns), len(lstFilesDCM))
+    
+    # The array is sized based on 'ConstPixelDims'
+    array = np.zeros(ConstPixelDims, dtype=RefDsFirst.pixel_array.dtype)
+    
+    # loop through all the DICOM files
+    for filenameDCM in lstFilesDCM:
+        # read the files
+        ds = dicom.read_file(filenameDCM)
+        # store the raw image data
+        array[:, :, lstFilesDCM.index(filenameDCM)] = ds.pixel_array  
+        
+    array = array*RefDsFirst.RescaleSlope + RefDsFirst.RescaleIntercept
+        
+    T1 = np.array(ImagePositionPatientFirst).astype(float)
+    TN = np.array(ImagePositionPatientLast).astype(float)
+    zaffine = np.divide(T1-TN,1.-float(array.shape[2]))
+    zaffinePerp = zaffine[2] #z affine resolved perpendicular to image
+    
+    # Load spacing values (in mm)
+    ConstPixelSpacing = (float(RefDsFirst.PixelSpacing[0]), float(RefDsFirst.PixelSpacing[1]), 
+                         float(zaffinePerp))
+    
+
+    F1 = np.array(RefDsFirst.ImageOrientationPatient[:3]).astype(float)
+    F2 = np.array(RefDsFirst.ImageOrientationPatient[3:6]).astype(float)
+    affine = np.zeros((4,4))
+    affine[:,1][:3] = -F1*ConstPixelSpacing[0]
+    affine[:,0][:3] = -F2*ConstPixelSpacing[1]
+    affine[:,2][:3] = zaffine
+    affine[:,3][:3] = [-T1[0], -T1[1], T1[2]]
+    affine[3,3] = 1.    
+    
+    return array, ConstPixelSpacing, [-T1[0], -T1[1], T1[2]], lstFilesDCM[0], affine
+
+def nifti2np(pathNifti):
+    """ 
+    Converts a NIFTI file to a numpy array. 
+    Returns img_data, the numpy array and ConstPixelSpacing, 
+    a list of the spacing between datapoints in mm for each dimension
+    """
+    img = nib.load(pathNifti)
+    img_data = img.get_data()
+    header = img.header
+    img_data_shape = img_data.shape
+    _extent = (0, img_data_shape[0] - 1, 0, img_data_shape[1] - 1, 0, img_data_shape[2] - 1)
+    ConstPixelDims = [_extent[1]-_extent[0]+1, _extent[3]-_extent[2]+1, _extent[5]-_extent[4]+1]
+    affine = img.header.get_best_affine()
+    spacing = header['pixdim'][1:4]
+    # Load spacing values
+    ConstPixelSpacing = spacing[0], spacing[1], spacing[2]
+    return(img_data, ConstPixelSpacing, affine)
+
+def nrrd2np(pathNrrd):
+    """ 
+    Converts a nrrd file to a numpy array. 
+    Returns img_data, the numpy array and ConstPixelSpacing, 
+    a list of the spacing between datapoints in mm for each dimension
+    """
+    import nrrd
+    readdata, options = nrrd.read(pathNrrd)
+    ConstPixelSpacing = []
+    spaceDirections = np.array(options['space directions'])
+    ImagePositionPatient = options['space origin']
+    for k in range(len(spaceDirections)):
+        ConstPixelSpacing.append(np.linalg.norm(spaceDirections[k]))
+    spaceDir = np.vstack(options['space directions'])
+    spaceOr = options['space origin']
+    affine = np.zeros((4,4))
+    affine[:3,:3] = spaceDir
+    affine[:3, 3] = spaceOr
+    affine[3,3] = .1
+
+    affine[3,3] = affine[3,3]*-1
+    affine[0:2,0:2] = -affine[0:2,0:2]
+    affine[0:2,3] = -affine[0:2,3]
+
+    return(readdata, ConstPixelSpacing, affine)
+
+
+def thresholdnp(array, lo, hi):
+    thresholded1 = np.multiply(array, (array>lo).astype(int))
+    thresholded2 = np.multiply(thresholded1, (array<hi).astype(int))
+    return thresholded2
+
+def orientation(numpy_array): #numpy_array needs to be binary/thresholded
+    import b2ac.preprocess
+    import b2ac.fit
+    import b2ac.conversion
+    numpy_array[abs(numpy_array)<0.01] = 0
+    numpy_array[~np.isfinite(numpy_array)] = 0
+    indices = np.nonzero(numpy_array)
+    if len(indices[0])>1:
+        x = indices[1]
+        y = indices[0]
+        z = indices[0] - indices[0]
+        xyz = rejectOutliers(np.array([x,y,z]))
+        x = xyz[0, :]
+        y = xyz[1, :]
+        points = np.zeros((len(indices[1]),2))
+        for i in range(x.shape[0]):
+            points[i, 0] = x[i]
+            points[i, 1] = y[i]
+        if points.shape[0] > 1:
+            try:
+                points, x_mean, y_mean = b2ac.preprocess.remove_mean_values(points)
+                # Fit using NumPy methods in double precision.
+                conic_double = b2ac.fit.fit_improved_B2AC_double(points)
+                # Convert from conic coefficient form to general ellipse form.
+                general_form_double = b2ac.conversion.conic_to_general_1(conic_double)
+                general_form_double[0][0] += x_mean
+                general_form_double[0][1] += y_mean
+            except:
+                general_form_double = 0
+        else: general_form_double = 0
+    else: general_form_double = 0
+    return general_form_double # [x, y], [x_axis, y_axis], angle
+    
+    
+def reshape(array, ConstPixelSpacing):
+    """ Reshape array to have cubic voxels of size 1mm^3 """
+
+    width = array.shape[0]
+    height = array.shape[1]
+    depth = array.shape[2]
+
+    a = int(width*ConstPixelSpacing[0]) # changed these around temporarily
+    b = int(height*ConstPixelSpacing[1]) # changed these around temporarily
+    c = int(depth*ConstPixelSpacing[2])
+
+    reshapedArray1 = np.zeros((a,height,depth))
+
+    xp = np.linspace(0, width*ConstPixelSpacing[0], width)
+    x  = np.linspace(0, a-1, a)
+
+    for j in range(height): # middle dimension
+        for k in range(depth): # last dimension
+            reshapedArray1[:,j,k] = np.interp(x, xp, array[0:len(xp),j,k])
+
+    reshapedArray2 = np.zeros((a,b,depth))
+    yp = np.linspace(0, height*ConstPixelSpacing[1], height)
+    y  = np.linspace(0, b-1, b)
+
+    for i in range(a): # first dimension
+        for k in range(depth): # last dimension
+            reshapedArray2[i,:,k] = np.interp(y, yp, reshapedArray1[i,0:len(yp),k])
+
+    reshapedArray3 = np.zeros((a,b,c))
+    zp = np.linspace(0, depth*ConstPixelSpacing[2], depth)
+    z = np.linspace(0, c-1, c)
+
+    for i in range(a): # first dimension
+        for j in range(b): # middle dimension
+            reshapedArray3[i,j,:] = np.interp(z, zp, reshapedArray2[i,j,0:len(zp)])
+
+    return reshapedArray3
+
+def ellipses(bone):
+    angles             =np.zeros(bone.shape[2])
+    xcentroids         =np.zeros(bone.shape[2])
+    ycentroids         =np.zeros(bone.shape[2])
+    xmajor_axis_points =np.zeros(bone.shape[2])
+    ymajor_axis_points =np.zeros(bone.shape[2])
+
+    for i in range(bone.shape[2]):
+        array_i           = bone[:,:,i] # array to pass to 'orientation' must be thresholded already
+        orientation_i     = orientation(array_i)
+        if orientation_i != 0: 
+            angles[i]      =orientation_i[2] # pick out the angle
+            xcentroids[i]  =orientation_i[0][0]
+            ycentroids[i]  =orientation_i[0][1]
+        else: pass
+    return angles, xcentroids, ycentroids
+
+def selectEllipsesRange(angles):
+    # make all angles positive
+    angles[angles < 0] += np.pi
+    import scipy.signal as signal
+    # First, design the Butterworth filter
+    N  = 1   # Filter order - the higher the order, the sharper the dropoff
+    pd = float(20)  # Cutoff period - the inverse is the cutoff frequency
+    fs = 1 # Sample rate frequency
+    nyq = 0.5*fs
+    low = 1/pd
+    wn = low/nyq # Cutoff frequency as a fraction
+    b, a = signal.butter(N, wn, output='ba')
+    filt_angles = signal.filtfilt(b,a, angles)
+    angles_diff = filt_angles-angles
+    indices = [] # indices holds the slice range of interest
+    for i in range(len(angles)):
+#       if abs(angles_diff[i]) < 0.1 and (1.45<abs(angles[i])<1.75 or 1.45-0.5*np.pi<abs(angles[i])<1.75-0.5*np.pi):
+        if abs(angles_diff[i]) < 0.1 and 1.4<abs(angles[i])<1.8:
+            indices.append(i)
+    from itertools import groupby
+    z = zip(indices, indices[1:])
+    tmp = ([list(j) for i, j in groupby(z, key=lambda x: (x[1] - x[0]) <= 1)])
+    tmp = sorted(tmp, key=len) # longest lists at the end
+    if len(tmp)>1:
+        maxtmp = np.array(max(tmp, key=len))
+        slices = list(range(maxtmp[0][0], maxtmp[-1][-1]+1))
+        slice_angles = [angles[i] for i in slices]
+    else:
+        slices = []
+        slice_angles = [np.pi/2]
+
+    return slices, slice_angles
+
+
+def findPlaneFromEllipses(bone, c1, c2, slices, head_x, head_y, head_angles): 
+    import findeyes as fer
+    bone[abs(bone)<0.01]    = 0
+    bone[~np.isfinite(bone)]= 0
+    coord = (c1+c2)/2.0
+
+    if slices != []:
+        print '\n','Using ellipses to find midplane','\n'
+        x=[]
+        y=[]
+        remaining_z = range(bone.shape[2]-1, slices[-1],-1)
+        for i in remaining_z:
+            x.append(np.mean(np.nonzero(bone[:,:,i])[1]))
+            y.append(np.mean(np.nonzero(bone[:,:,i])[0]))
+        centroids_array = np.concatenate((np.array([head_x,head_y,slices]).T, np.array([x,y,remaining_z]).T),axis=0).T
+        centroids_array[~np.isfinite(centroids_array)]=0
+        centroids_array[abs(centroids_array)<0.01] = 0
+        centroids_array = rejectOutliers(centroids_array)
+        
+        from scipy.optimize import curve_fit
+        def f(x,A,B):
+            return A*x + B
+        A_x1,B_x1 = curve_fit(f, centroids_array[2], centroids_array[0])[0] # your data x, y to fit
+        A_y1,B_y1 = curve_fit(f, centroids_array[2], centroids_array[1])[0] # your data x, y to fit
+
+        z = np.median(slices)
+
+        x = A_x1*z + B_x1
+        y = A_y1*z + B_y1
+#        point that the plane goes through, p
+        p = np.array([x, y, z]) # coordinates when z = mean(indices)
+        v1 = np.array([A_x1/2, A_y1/2, 1])
+        v1 = v1/np.linalg.norm(v1)
+        mean_angle = np.mean(head_angles)
+        v2 = np.cross(np.array([np.sin(mean_angle), np.cos(mean_angle), 0]), np.array([0,0,1]))
+
+        normal = np.cross(v1,v2)
+        normal = normal/np.sqrt((np.sum(np.power(normal,2))))
+        normal = np.nan_to_num(normal)
+        # a plane is ax+by+cz = d - find d
+        d = np.dot(coord,normal)
+        # superpose plane onto slices
+        a = normal[0]
+        b = normal[1]
+        c = normal[2]
+        # plane equation is ax+by+cz = d
+        # for each slice substitute slice number into z to get equation
+    else:
+
+        print '\n','Using eyes to find midplane, as ellipses were unreliable','\n'
+
+        v2 = c1-c2
+        v2 = np.divide(v2, np.linalg.norm(v2))
+        normal = v2
+        d = np.dot(coord,normal)
+        a = normal[0]
+        b = normal[1]
+        c = normal[2]
+    return a,b,c,d,normal
+
+
+def visualiseSingle(rotatedBone, a,b,c,d, slice_no):
+    import plotly as py
+    import plotly.graph_objs as go
+    py.offline.init_notebook_mode()
+    slice_ = rotatedBone[:,:,slice_no]
+    heatmap = go.Heatmap(
+            z = slice_,
+            colorscale=[[0.0, 'rgb(160,160,160)'], 
+                        [0.1111111111111111, 'rgb(20,20,20)'], 
+                        [0.2222222222222222, 'rgb(40,40,40)'], 
+                        [0.3333333333333333, 'rgb(100,100,100)'], 
+                        [0.4444444444444444, 'rgb(120,120,120)'], 
+                        [0.5555555555555556, 'rgb(140,140,140)'], 
+                        [0.6666666666666666, 'rgb(160,160,160)'], 
+                        [0.7777777777777778, 'rgb(170,170,170)'], 
+                        [0.8888888888888888, 'rgb(250,250,250)'], 
+                        [1.0, 'rgb(250,250,250)']]
+            )
+    x = np.linspace(0,slice_.shape[0], 2)
+    y = (d-c*slice_no-a*x)/b
+    midline = go.Scatter(
+        x = x,
+        y = y,
+        mode = 'lines'
+    )
+    layout = go.Layout(
+        width = 600,
+        height= 600,
+    #     title='Fig. 10. Slice number %i' % slice_no,
+        title='Fig. 10. Slice of the midplane found', # title for report
+        showlegend = False,
+            margin= go.Margin(
+            l=50,
+            r=50,
+            b=100,
+            t=50,
+            pad=4
+            ),
+    )
+
+    data = [heatmap, midline]
+    fig = go.Figure(data=data, layout=layout)
+    py.offline.iplot(fig)
+    return None
+
+
+def correctPlaneParams(angle1, angle2, n, c1Reshaped, c2Reshaped, pixelspacing):
+    import math
+            
+    ang1rad = angle1/360.*2*np.pi
+    ang2rad = angle2/360.*2*np.pi
+            
+    rotAngle = np.sin(ang2rad)*angle1-90
+
+    while rotAngle<=-45: #skews are never that big
+        rotAngle = rotAngle+90
+
+    rotAngle = rotAngle/360.*2*np.pi
+    
+    a = rotAngle
+    
+    yrotM = np.array([[np.cos(a),  0,-np.sin(a) ], #scipy's definition on y is the cartesian x axis
+                      [0,          1,        0  ],
+                      [np.sin(a),  0, np.cos(a)]])
+    
+    a = ang2rad
+    
+    zrotM = np.asarray([[np.cos(a), -np.sin(a), 0.],
+                      [np.sin(a),  np.cos(a), 0.],
+                      [0.,          0.      , 1.]])  
+    
+    R = np.dot(zrotM, yrotM)
+    n1 = np.dot(yrotM, n)
+    normal = np.dot(R, n)
+    n2 = normal
+    normal = np.true_divide(normal, pixelspacing)
+    normal = normal/np.linalg.norm(normal)
+
+    c = 0.5*(c1Reshaped+c2Reshaped)
+    mideyes = np.array([c[1], c[0], c[2]])
+    mideyes = np.true_divide(mideyes, pixelspacing)
+
+    d = np.dot(mideyes, normal)
+    a = normal[0]
+    b = normal[1]
+    c = normal[2]
+    
+    return a,b,c,d,normal, n1, n2
+    
