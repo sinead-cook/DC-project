@@ -88,7 +88,7 @@ def regionseparation(array):
         haemotoma_mask = (array5>50.0).astype(float)*1000
 
         # img = nib.Nifti1Image(h_mask, np.eye(4))
-        # nib.save(img, '/Users/Sinead/DC-project/h-mask-50-{}.nii.gz'.format(samp))
+        # nib.save(img, '/h-mask-50-{}.nii.gz'.format(samp))
         array6 = np.multiply(brain_mask, h_mask)
         array7 = be(array6)
         array8 = bc((array7))

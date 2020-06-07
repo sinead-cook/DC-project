@@ -1,3 +1,0 @@
-
-Error: input image temp not valid
-
